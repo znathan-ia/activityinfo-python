@@ -65,12 +65,26 @@ def raise_for_error(response: requests.Response) -> None:
     if status in (200, 201, 204):
         return
 
-    # Extraire le message d'erreur si disponible
+    # Extraire le message d'erreur si disponible.
+    # Si le serveur répond en HTML (page de connexion, page d'erreur
+    # générique...) plutôt qu'en JSON, c'est généralement le signe d'un
+    # problème d'authentification ou d'URL, pas d'une vraie erreur
+    # applicative : on évite de recracher toute la page HTML brute dans
+    # le message d'exception et on donne un indice exploitable à la place.
+    content_type = response.headers.get("Content-Type", "")
     try:
         error_data = response.json()
         message = error_data.get("message", response.text)
     except ValueError:
-        message = response.text or f"Erreur HTTP {status}"
+        if "html" in content_type.lower():
+            message = (
+                "Le serveur a répondu avec une page HTML au lieu de JSON "
+                "(souvent le signe d'un token invalide/expiré ou d'une "
+                "URL de serveur incorrecte, plutôt que d'une erreur "
+                "applicative). Vérifiez votre token API et server_url."
+            )
+        else:
+            message = response.text or f"Erreur HTTP {status}"
 
     if status == 401:
         raise AuthenticationError(f"Token invalide ou expiré : {message}")
@@ -84,7 +98,6 @@ def raise_for_error(response: requests.Response) -> None:
         raise ServerError(f"Erreur serveur ActivityInfo ({status}) : {message}")
     else:
         raise ActivityInfoError(f"Erreur inattendue ({status}) : {message}")
-
 
 def handle_response(response: requests.Response) -> dict:
     """
