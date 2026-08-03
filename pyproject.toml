@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "activityinfo"
+version = "0.1.0"
+description = "Package Python complet pour l'API ActivityInfo - inspiré du package R bedatadriven/activityinfo-R"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+
+keywords = ["activityinfo", "humanitarian", "api", "M&E", "monitoring"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "requests>=2.28.0",
+    "urllib3>=1.26.0",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=1.5.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "requests-mock",
+    "black",
+    "ruff",
+    "mypy",
+]
+all = ["activityinfo[pandas,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/votre-org/activityinfo-python"
+Documentation = "https://www.activityinfo.org/support/docs/api/index.html"
+"API Reference" = "https://www.activityinfo.org/apidocs/index.html"
+"R Package Reference" = "https://github.com/bedatadriven/activityinfo-R"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["activityinfo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
