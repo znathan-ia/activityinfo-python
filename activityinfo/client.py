@@ -15,7 +15,7 @@ import time
 from typing import Optional, List, Dict, Any, Iterator
 
 from .exceptions import ActivityInfoError, JobError, ValidationError
-from .utils.http import build_session, safe_request, BASE_URL
+from .utils.http import build_session, safe_request, safe_request_binary, BASE_URL
 from .utils.cuid import generate_cuid
 from .models.database import Database, DatabaseResource, DatabaseUser
 from .models.form import FormSchema, FormRecord
@@ -406,15 +406,22 @@ class ActivityInfoClient:
         if field_mapping:
             df = df.rename(columns=field_mapping)
 
-        # Convertir en liste de dicts, ignorer les NaN
+        # Convertir en liste de dicts, en remplaçant les NaN par None.
+        # NB : on ne peut pas comparer au nom de classe "float" car
+        # pandas/numpy retournent souvent des numpy.float64 ("float64"),
+        # ce qui ratait silencieusement la détection des NaN. Le test
+        # `v != v` est vrai uniquement pour NaN (IEEE 754), et fonctionne
+        # aussi bien pour float, numpy.float64 ou pandas.NA sans avoir à
+        # importer numpy/pandas ici.
         records = []
         for _, row in df.iterrows():
-            record = {
-                k: (None if (hasattr(v, '__class__') and
-                             v.__class__.__name__ == 'float' and
-                             str(v) == 'nan') else v)
-                for k, v in row.items()
-            }
+            record = {}
+            for k, v in row.items():
+                try:
+                    is_missing = v != v
+                except Exception:
+                    is_missing = False
+                record[k] = None if is_missing else v
             records.append(record)
 
         logger.info(f"Import de {len(records)} lignes vers {form_id}")
@@ -461,7 +468,6 @@ class ActivityInfoClient:
         Liste les utilisateurs d'une base de données.
         Équivalent R : getDatabaseUsers()
         """
-        from .models.database import DatabaseUser
         data = self._get(f"/api/databases/{database_id}/users")
         users = data if isinstance(data, list) else data.get("users", [])
         return [DatabaseUser.from_dict(u) for u in users]
@@ -473,7 +479,6 @@ class ActivityInfoClient:
         Ajoute un utilisateur à une base de données.
         Équivalent R : addDatabaseUser()
         """
-        from .models.database import DatabaseUser
         payload = {
             "email": email,
             "name": name,
@@ -547,12 +552,14 @@ class ActivityInfoClient:
         """
         Télécharge une pièce jointe.
         Équivalent R : getAttachment()
+
+        Utilise le même chemin de gestion d'erreurs/timeout que le reste
+        du client (401/403/404/429/5xx lèvent l'exception appropriée)
+        plutôt qu'un appel de session brut sans garde-fous.
         """
-        response = self._session.get(
-            f"{self._base_url}/api/form/{form_id}/record/"
-            f"{record_id}/field/{field_id}/blob/{blob_id}"
-        )
-        return response.content
+        url = (f"{self._base_url}/api/form/{form_id}/record/"
+               f"{record_id}/field/{field_id}/blob/{blob_id}")
+        return safe_request_binary(self._session, "GET", url)
 
     def get_form_geojson(self, form_id: str) -> dict:
         """

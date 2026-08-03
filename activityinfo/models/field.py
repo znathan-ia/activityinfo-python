@@ -101,16 +101,23 @@ class Field:
             d["relevanceRule"] = self.relevance_rule
         if self.validation_rule:
             d["validationRule"] = self.validation_rule
+
+        # Un seul de ces attributs est pertinent à la fois selon le type
+        # du champ (options / référence / unités / formule). On utilise
+        # une chaîne elif plutôt que des if indépendants pour ne jamais
+        # écraser silencieusement typeParameters si plusieurs attributs
+        # se trouvaient renseignés simultanément.
         if self.options:
             d["typeParameters"] = {
                 "values": [o.to_dict() for o in self.options]
             }
-        if self.reference_form_id:
+        elif self.reference_form_id:
             d["typeParameters"] = {"range": [{"formId": self.reference_form_id}]}
-        if self.units:
+        elif self.units:
             d["typeParameters"] = {"units": self.units}
-        if self.formula:
+        elif self.formula:
             d["typeParameters"] = {"formula": self.formula}
+
         return d
 
     @classmethod

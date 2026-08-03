@@ -52,18 +52,18 @@ def build_session(token: str, timeout: int = 30) -> requests.Session:
     return session
 
 
-def handle_response(response: requests.Response) -> dict:
+def raise_for_error(response: requests.Response) -> None:
     """
-    Analyse la réponse HTTP et lève l'exception appropriée.
-    Retourne le JSON parsé si succès.
+    Lève l'exception ActivityInfo appropriée si la réponse HTTP
+    indique une erreur. Ne fait rien si la réponse est un succès.
+
+    200/201 : succès avec corps (ex : GET, POST création)
+    204     : succès sans corps (ex : DELETE) — n'est PAS une erreur.
     """
     status = response.status_code
 
-    if status == 200 or status == 201:
-        try:
-            return response.json() if response.content else {}
-        except ValueError:
-            return {}
+    if status in (200, 201, 204):
+        return
 
     # Extraire le message d'erreur si disponible
     try:
@@ -86,10 +86,24 @@ def handle_response(response: requests.Response) -> dict:
         raise ActivityInfoError(f"Erreur inattendue ({status}) : {message}")
 
 
+def handle_response(response: requests.Response) -> dict:
+    """
+    Analyse la réponse HTTP, lève l'exception appropriée en cas d'erreur,
+    et retourne le JSON parsé si succès (dict vide si pas de contenu,
+    par ex. sur une réponse 204).
+    """
+    raise_for_error(response)
+    try:
+        return response.json() if response.content else {}
+    except ValueError:
+        return {}
+
+
 def safe_request(session: requests.Session, method: str,
                  url: str, **kwargs) -> dict:
     """
     Exécute une requête HTTP sécurisée avec gestion complète des erreurs.
+    Retourne le corps JSON parsé (dict).
     """
     timeout = kwargs.pop("timeout", getattr(session, "_default_timeout", 30))
     logger.debug(f"{method.upper()} {url}")
@@ -97,6 +111,33 @@ def safe_request(session: requests.Session, method: str,
     try:
         response = session.request(method, url, timeout=timeout, **kwargs)
         return handle_response(response)
+
+    except requests.exceptions.ConnectionError as e:
+        raise ConnectionError(f"Impossible de joindre ActivityInfo : {e}")
+    except requests.exceptions.Timeout as e:
+        raise TimeoutError(f"Délai d'attente dépassé : {e}")
+    except (AuthenticationError, NotFoundError, PermissionError,
+            RateLimitError, ServerError, ActivityInfoError):
+        raise  # Re-raise nos exceptions personnalisées
+    except requests.exceptions.RequestException as e:
+        raise ActivityInfoError(f"Erreur réseau inattendue : {e}")
+
+
+def safe_request_binary(session: requests.Session, method: str,
+                        url: str, **kwargs) -> bytes:
+    """
+    Variante de safe_request pour les réponses binaires (ex : pièces
+    jointes / blobs) : mêmes garanties de gestion d'erreurs et de
+    timeout que safe_request, mais retourne des bytes bruts au lieu
+    de tenter un parsing JSON.
+    """
+    timeout = kwargs.pop("timeout", getattr(session, "_default_timeout", 30))
+    logger.debug(f"{method.upper()} {url}")
+
+    try:
+        response = session.request(method, url, timeout=timeout, **kwargs)
+        raise_for_error(response)
+        return response.content
 
     except requests.exceptions.ConnectionError as e:
         raise ConnectionError(f"Impossible de joindre ActivityInfo : {e}")
