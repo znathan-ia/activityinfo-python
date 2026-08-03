@@ -13,14 +13,14 @@ from typing import Optional, List, Dict, Any
 class Database:
     """
     Représente une base de données ActivityInfo.
-    Équivalent de getDatabases() dans le package R.
+    Équivalent de getDatabases() / getDatabaseTree() dans le package R.
     """
     id: str
     label: str
     description: Optional[str] = None
-    owner_name: Optional[str] = None
-    owner_email: Optional[str] = None
+    owner_id: Optional[str] = None
     billing_account_id: Optional[str] = None
+    suspended: Optional[bool] = None
 
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -30,9 +30,14 @@ class Database:
             id=data.get("databaseId", data.get("id", "")),
             label=data.get("label", ""),
             description=data.get("description"),
-            owner_name=data.get("ownerName"),
-            owner_email=data.get("ownerEmail"),
-            billing_account_id=data.get("billingAccountId"),
+            owner_id=(
+                str(data["ownerId"]) if data.get("ownerId") is not None else None
+            ),
+            billing_account_id=(
+                str(data["billingAccountId"])
+                if data.get("billingAccountId") is not None else None
+            ),
+            suspended=data.get("suspended"),
             _raw=data,
         )
 
@@ -45,7 +50,7 @@ class DatabaseResource:
     """
     Représente une ressource dans une base de données
     (formulaire, sous-formulaire, dossier, rapport...).
-    Équivalent de getDatabaseResources() dans le package R.
+
     """
     id: str
     label: str
@@ -85,24 +90,30 @@ class DatabaseResource:
 
 @dataclass
 class DatabaseUser:
-    """Représente un utilisateur d'une base de données."""
+    """
+    Représente un utilisateur d'une base de données.
+
+    """
     user_id: Optional[int] = None
     name: Optional[str] = None
     email: Optional[str] = None
     role_id: Optional[str] = None
     role_label: Optional[str] = None
+    role_raw: Optional[Dict[str, Any]] = None
     locale: Optional[str] = "fr"
 
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_dict(cls, data: dict) -> "DatabaseUser":
+        role = data.get("role") or {}
         return cls(
             user_id=data.get("userId"),
             name=data.get("name"),
             email=data.get("email"),
-            role_id=data.get("roleId"),
-            role_label=data.get("roleLabel"),
+            role_id=role.get("id", data.get("roleId")),
+            role_label=role.get("label", data.get("roleLabel")),
+            role_raw=role or None,
             locale=data.get("locale", "fr"),
             _raw=data,
         )
