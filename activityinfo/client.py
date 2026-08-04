@@ -289,7 +289,9 @@ class ActivityInfoClient:
         return FormSchema.from_dict(forms[0]["schema"])
 
     def add_field(self, form_id: str, field_dict: dict,
-                 upload: bool = True) -> FormSchema:
+                 upload: bool = True,
+                 after: str = None,
+                 position: int = None) -> FormSchema:
         """
         Ajoute un nouveau champ à un formulaire existant.
         Équivalent R : addFormField()
@@ -315,11 +317,26 @@ class ActivityInfoClient:
             local mis à jour sans rien envoyer (pratique pour composer
             plusieurs ajouts avant un seul appel réseau — enchaîne alors
             avec client.update_form_schema(schema) toi-même).
+        after : str, optionnel
+            Place le nouveau champ juste après le champ dont le code ou
+            l'id est donné, plutôt qu'à la fin du formulaire (comportement
+            par défaut, identique à R). Si le code/id n'est pas trouvé,
+            le champ est ajouté à la fin avec un avertissement.
+
+             Position non testée en direct : le package R n'offre pas
+            cette option (il ajoute toujours à la fin), donc l'hypothèse
+            que l'ordre de la liste `elements` détermine l'ordre
+            d'affichage dans le formulaire n'a pas été confirmée contre
+            un vrai serveur — à vérifier visuellement après le test.
+        position : int, optionnel
+            Alternative à `after` : index numérique où insérer le champ
+            (0 = tout au début). Ignoré si `after` est aussi fourni.
 
         Exemple
         -------
         >>> from activityinfo import text_field
         >>> client.add_field("form001", text_field("Commentaire", code="COMMENT"))
+        >>> client.add_field("form001", text_field("Note", code="NOTE"), after="NOM")
         """
         schema = self.get_form_schema(form_id)
         existing_ids = {f.id for f in schema.fields}
@@ -349,7 +366,26 @@ class ActivityInfoClient:
             )
             field_dict["code"] = new_code
 
-        schema.fields.append(Field.from_dict(field_dict))
+        new_field = Field.from_dict(field_dict)
+
+        if after is not None:
+            idx = next(
+                (i for i, f in enumerate(schema.fields)
+                 if f.code == after or f.id == after),
+                None,
+            )
+            if idx is None:
+                logger.warning(
+                    f"add_field : aucun champ correspondant à after={after!r} "
+                    f"trouvé dans le formulaire {form_id} ; ajout à la fin."
+                )
+                schema.fields.append(new_field)
+            else:
+                schema.fields.insert(idx + 1, new_field)
+        elif position is not None:
+            schema.fields.insert(position, new_field)
+        else:
+            schema.fields.append(new_field)
 
         if upload:
             return self.update_form_schema(schema)
