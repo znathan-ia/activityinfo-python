@@ -77,6 +77,9 @@ class Field:
     # Pour "reference"
     reference_form_id: Optional[str] = None
 
+    # Pour "subform" (champ intégrant directement un sous-formulaire)
+    subform_id: Optional[str] = None
+
     # Pour "quantity"
     units: Optional[str] = None
     aggregation: Optional[str] = None
@@ -103,9 +106,9 @@ class Field:
         if self.description:
             d["description"] = self.description
         if self.relevance_rule:
-            d["relevanceRule"] = self.relevance_rule
+            d["relevanceCondition"] = self.relevance_rule
         if self.validation_rule:
-            d["validationRule"] = self.validation_rule
+            d["validationCondition"] = self.validation_rule
 
         # Un seul de ces attributs est pertinent à la fois selon le type
         # du champ. On utilise une chaîne elif pour ne jamais écraser
@@ -122,6 +125,8 @@ class Field:
                 "cardinality": "single",
                 "range": [{"formId": self.reference_form_id}],
             }
+        elif self.subform_id:
+            d["typeParameters"] = {"formId": self.subform_id}
         elif self.units is not None:
             d["typeParameters"] = {
                 "units": self.units,
@@ -139,6 +144,7 @@ class Field:
         options = []
         cardinality = None
         reference_form_id = None
+        subform_id = None
         units = None
         aggregation = None
         formula = None
@@ -155,6 +161,8 @@ class Field:
             ranges = type_params.get("range", [])
             if ranges:
                 reference_form_id = ranges[0].get("formId")
+        elif field_type == "subform":
+            subform_id = type_params.get("formId")
         elif field_type == "quantity":
             units = type_params.get("units")
             aggregation = type_params.get("aggregation")
@@ -173,11 +181,12 @@ class Field:
             description=data.get("description"),
             required=data.get("required", False),
             key=data.get("key", False),
-            relevance_rule=data.get("relevanceRule"),
-            validation_rule=data.get("validationRule"),
+            relevance_rule=data.get("relevanceCondition"),
+            validation_rule=data.get("validationCondition"),
             options=options,
             cardinality=cardinality,
             reference_form_id=reference_form_id,
+            subform_id=subform_id,
             units=units,
             aggregation=aggregation,
             formula=formula,
@@ -270,7 +279,7 @@ def single_select_field(label: str, options: List[str], code: str = None,
         },
     }
     if code: d["code"] = code
-    if relevance_rule: d["relevanceRule"] = relevance_rule
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
