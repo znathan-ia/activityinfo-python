@@ -288,6 +288,73 @@ class ActivityInfoClient:
             )
         return FormSchema.from_dict(forms[0]["schema"])
 
+    def add_field(self, form_id: str, field_dict: dict,
+                 upload: bool = True) -> FormSchema:
+        """
+        Ajoute un nouveau champ à un formulaire existant.
+        Équivalent R : addFormField()
+
+        Récupère le schéma actuel, ajoute le champ à la liste, puis envoie
+        le schéma complet mis à jour (via update_form_schema()) — il n'y a
+        pas d'endpoint pour ajouter un seul champ isolément, l'API réelle
+        attend toujours le schéma entier.
+
+        Comme le fait R : si l'id ou le code du nouveau champ entre en
+        collision avec un champ déjà présent dans le formulaire, un
+        nouvel id/code est généré automatiquement (avec un avertissement
+        dans les logs) plutôt que d'envoyer un schéma invalide au serveur.
+
+        Paramètres
+        ----------
+        form_id : str
+        field_dict : dict
+            Un champ créé avec text_field(), quantity_field(), etc.
+        upload : bool
+            Si True (défaut), envoie la mise à jour au serveur et renvoie
+            le schéma confirmé par le serveur. Si False, renvoie le schéma
+            local mis à jour sans rien envoyer (pratique pour composer
+            plusieurs ajouts avant un seul appel réseau — enchaîne alors
+            avec client.update_form_schema(schema) toi-même).
+
+        Exemple
+        -------
+        >>> from activityinfo import text_field
+        >>> client.add_field("form001", text_field("Commentaire", code="COMMENT"))
+        """
+        schema = self.get_form_schema(form_id)
+        existing_ids = {f.id for f in schema.fields}
+        existing_codes = {f.code for f in schema.fields if f.code}
+
+        field_dict = dict(field_dict)  # copie : ne pas muter l'original de l'appelant
+
+        if field_dict.get("id") in existing_ids:
+            old_id = field_dict["id"]
+            field_dict["id"] = generate_cuid()
+            logger.warning(
+                f"add_field : id {old_id!r} déjà utilisé dans le formulaire "
+                f"{form_id}, nouvel id généré automatiquement : "
+                f"{field_dict['id']!r}"
+            )
+
+        code = field_dict.get("code")
+        if code and code in existing_codes:
+            new_code, i = code, 2
+            while new_code in existing_codes:
+                new_code = f"{code}_{i}"
+                i += 1
+            logger.warning(
+                f"add_field : code {code!r} déjà utilisé dans le formulaire "
+                f"{form_id}, nouveau code généré automatiquement : "
+                f"{new_code!r}"
+            )
+            field_dict["code"] = new_code
+
+        schema.fields.append(Field.from_dict(field_dict))
+
+        if upload:
+            return self.update_form_schema(schema)
+        return schema
+
     def delete_form(self, database_id: str, form_id: str) -> None:
         """
         Supprime un formulaire.
@@ -340,7 +407,7 @@ class ActivityInfoClient:
         """
         Récupère tous les enregistrements d'un formulaire.
 
-        BEST-EFFORT : il n'existe PAS d'endpoint REST direct
+         BEST-EFFORT : il n'existe PAS d'endpoint REST direct
         "liste des enregistrements d'un formulaire" dans l'API réelle
         (contrairement à ce que la version précédente supposait, avec
         pagination par curseur inventée). La vraie méthode consiste à
