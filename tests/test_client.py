@@ -430,5 +430,80 @@ def test_add_field_avoids_code_collision(mock_req, client):
     assert sent_codes.count("NOM") == 1  # pas de doublon envoyé au serveur
 
 
+@patch("requests.Session.request")
+def test_delete_field_by_code(mock_req, client):
+    """delete_field(code=...) doit retirer le champ correspondant et
+    poster le schéma sans lui."""
+    mock_req.side_effect = [
+        make_mock_response(200, {  # GET schema (2 champs)
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
+                {"id": "f2", "label": "Commentaire", "type": "FREE_TEXT",
+                 "code": "COMMENT", "required": False, "key": False},
+            ],
+        }),
+        make_mock_response(200, {  # POST update -> schéma avec 1 champ
+            "forms": [{"id": "form001", "schema": {
+                "id": "form001", "label": "Test", "databaseId": "db001",
+                "elements": [
+                    {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                     "code": "NOM", "required": False, "key": False},
+                ],
+            }}]
+        }),
+    ]
+    updated = client.delete_field("form001", code="COMMENT")
+    assert len(updated.fields) == 1
+    sent_json = mock_req.call_args_list[1].kwargs.get("json")
+    sent_codes = [e.get("code") for e in sent_json["elements"]]
+    assert "COMMENT" not in sent_codes
+    assert "NOM" in sent_codes
+
+
+@patch("requests.Session.request")
+def test_delete_field_ambiguous_label_raises(mock_req, client):
+    """Si plusieurs champs partagent le même label, delete_field(label=...)
+    doit lever ValidationError plutôt que de supprimer au hasard (comme
+    le fait deleteFormField() côté R)."""
+    mock_req.return_value = make_mock_response(200, {
+        "id": "form001", "label": "Test", "databaseId": "db001",
+        "elements": [
+            {"id": "f1", "label": "Commentaire", "type": "FREE_TEXT",
+             "code": "C1", "required": False, "key": False},
+            {"id": "f2", "label": "Commentaire", "type": "FREE_TEXT",
+             "code": "C2", "required": False, "key": False},
+        ],
+    })
+    with pytest.raises(ValidationError):
+        client.delete_field("form001", label="Commentaire")
+
+
+@patch("requests.Session.request")
+def test_delete_field_not_found_returns_unchanged(mock_req, client):
+    """Si aucun champ ne correspond, on ne poste rien et on renvoie le
+    schéma tel quel (pas d'exception, juste un avertissement)."""
+    mock_req.return_value = make_mock_response(200, {
+        "id": "form001", "label": "Test", "databaseId": "db001",
+        "elements": [
+            {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+             "code": "NOM", "required": False, "key": False},
+        ],
+    })
+    result = client.delete_field("form001", code="INEXISTANT")
+    assert len(result.fields) == 1
+    assert mock_req.call_count == 1  # un seul appel (le GET), pas de POST
+
+
+@patch("requests.Session.request")
+def test_delete_field_requires_exactly_one_identifier(mock_req, client):
+    """Ni zéro ni plusieurs identifiants ne doivent être acceptés."""
+    with pytest.raises(ValidationError):
+        client.delete_field("form001")
+    with pytest.raises(ValidationError):
+        client.delete_field("form001", field_id="f1", code="NOM")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
