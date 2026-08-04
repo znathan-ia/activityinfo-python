@@ -99,6 +99,7 @@ def raise_for_error(response: requests.Response) -> None:
     else:
         raise ActivityInfoError(f"Erreur inattendue ({status}) : {message}")
 
+
 def handle_response(response: requests.Response) -> dict:
     """
     Analyse la réponse HTTP, lève l'exception appropriée en cas d'erreur,
