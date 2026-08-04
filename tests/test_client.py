@@ -27,13 +27,17 @@ def client():
     return ActivityInfoClient("fake_token_for_tests")
 
 
-def make_mock_response(status_code: int, data=None):
+def make_mock_response(status_code: int, data=None, headers=None):
     """Crée une réponse HTTP mockée."""
     mock = MagicMock()
     mock.status_code = status_code
     mock.content = b"content" if data else b""
     mock.text = json.dumps(data) if data else ""
     mock.json.return_value = data or {}
+    # Content-Type par défaut JSON, pour éviter que raise_for_error()
+    # ne déclenche à tort sa détection "réponse HTML" avec un MagicMock
+    # non configuré (dont .get()/.lower() renverraient d'autres Mocks).
+    mock.headers = headers if headers is not None else {"Content-Type": "application/json"}
     return mock
 
 
@@ -121,25 +125,39 @@ def test_get_form_schema_not_found(mock_req, client):
 
 @patch("requests.Session.request")
 def test_get_records_paginated(mock_req, client):
-    # Simule 2 pages
+    # get_records() sans `fields` : 1) lit le schéma pour connaître les
+    # champs, 2) interroge /query/columns en paginant via `window`
+    # jusqu'à couvoir `totalRows`. Simule 2 pages de résultats.
     mock_req.side_effect = [
-        make_mock_response(200, {
-            "items": [
-                {"recordId": "r1", "fields": {"NOM": "Alice"}},
-                {"recordId": "r2", "fields": {"NOM": "Bob"}},
+        make_mock_response(200, {  # GET /resources/form/form001/schema
+            "id": "form001", "label": "Enquête", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
             ],
-            "cursor": "cursor_page_2"
         }),
-        make_mock_response(200, {
-            "items": [
-                {"recordId": "r3", "fields": {"NOM": "Charlie"}},
+        make_mock_response(200, {  # POST /resources/query/columns (page 1)
+            "rows": 2, "totalRows": 3,
+            "columns": [
+                {"id": "_id", "storage": "array", "values": ["r1", "r2"]},
+                {"id": "_lastEditTime", "storage": "array", "values": [1000, 1001]},
+                {"id": "NOM", "storage": "array", "values": ["Alice", "Bob"]},
             ],
-            "cursor": None
+        }),
+        make_mock_response(200, {  # POST /resources/query/columns (page 2)
+            "rows": 1, "totalRows": 3,
+            "columns": [
+                {"id": "_id", "storage": "array", "values": ["r3"]},
+                {"id": "_lastEditTime", "storage": "array", "values": [1002]},
+                {"id": "NOM", "storage": "array", "values": ["Charlie"]},
+            ],
         }),
     ]
     records = client.get_records("form001")
     assert len(records) == 3
     assert records[0].record_id == "r1"
+    assert records[0].values["NOM"] == "Alice"
+    assert records[2].values["NOM"] == "Charlie"
     assert isinstance(records[0], FormRecord)
 
 
@@ -234,22 +252,82 @@ def test_form_schema_field_codes():
 
 @patch("requests.Session.request")
 def test_wait_for_job_success(mock_req, client):
+    # L'API réelle utilise des états en minuscules ("started"/"completed"),
+    # pas "RUNNING"/"COMPLETED" en majuscules (voir R : executeJob()).
     mock_req.side_effect = [
-        make_mock_response(200, {"state": "RUNNING"}),
-        make_mock_response(200, {"state": "COMPLETED", "result": "ok"}),
+        make_mock_response(200, {"state": "started"}),
+        make_mock_response(200, {"state": "completed", "result": "ok"}),
     ]
     result = client._wait_for_job("job001", poll_interval=0)
-    assert result["state"] == "COMPLETED"
+    assert result["state"] == "completed"
 
 
 @patch("requests.Session.request")
 def test_wait_for_job_failure(mock_req, client):
     mock_req.return_value = make_mock_response(200, {
-        "state": "FAILED",
+        "state": "failed",
         "error": {"message": "Erreur d'import"}
     })
     with pytest.raises(JobError):
         client._wait_for_job("job002", poll_interval=0)
+
+
+# ─── TESTS : CORRECTION DU PRÉFIXE /resources ET DES PAYLOADS RÉELS ──────────
+
+@patch("requests.Session.request")
+def test_requests_use_resources_prefix(mock_req, client):
+    """Toutes les requêtes doivent cibler /resources/..., pas /api/...
+    (c'était la cause racine des NotFoundError observées en usage réel)."""
+    mock_req.return_value = make_mock_response(200, [])
+    client.get_databases()
+    called_url = mock_req.call_args.args[1] if len(mock_req.call_args.args) > 1 \
+        else mock_req.call_args.kwargs.get("url")
+    assert "/resources/databases" in called_url
+    assert "/api/" not in called_url
+
+
+@patch("requests.Session.request")
+def test_delete_form_requires_database_id(mock_req, client):
+    """delete_form() doit poster un diff resourceDeletions vers
+    /resources/databases/{database_id}, pas un DELETE /form/{id} direct
+    (qui n'existe pas dans l'API réelle)."""
+    mock_req.return_value = make_mock_response(200, {})
+    client.delete_form("db001", "form001")
+    called_url = mock_req.call_args.args[1] if len(mock_req.call_args.args) > 1 \
+        else mock_req.call_args.kwargs.get("url")
+    sent_json = mock_req.call_args.kwargs.get("json")
+    assert "/resources/databases/db001" in called_url
+    assert sent_json["resourceDeletions"] == ["form001"]
+
+
+@patch("requests.Session.request")
+def test_add_database_user_nested_role_payload(mock_req, client):
+    """L'API réelle attend un objet "role" imbriqué {id, parameters,
+    resources}, pas un simple "roleId" au niveau racine."""
+    mock_req.return_value = make_mock_response(200, {
+        "userId": 42, "email": "a@b.org", "name": "Alice", "roleId": "admin"
+    })
+    client.add_database_user("db001", "a@b.org", "Alice", role_id="admin")
+    sent_json = mock_req.call_args.kwargs.get("json")
+    assert sent_json["role"]["id"] == "admin"
+    assert "roleId" not in sent_json
+
+
+@patch("requests.Session.request")
+def test_update_form_schema_is_post_with_nested_response(mock_req, client):
+    """update_form_schema() doit faire un POST (pas un PUT) et lire la
+    réponse imbriquée sous forms[0].schema."""
+    from activityinfo.models.form import FormSchema
+    schema = FormSchema(id="form001", label="Test", database_id="db001", fields=[])
+    mock_req.return_value = make_mock_response(200, {
+        "forms": [{"id": "form001", "schema": {
+            "id": "form001", "label": "Test modifié", "databaseId": "db001",
+            "elements": [],
+        }}]
+    })
+    updated = client.update_form_schema(schema)
+    assert mock_req.call_args.args[0] == "POST"
+    assert updated.label == "Test modifié"
 
 
 if __name__ == "__main__":
