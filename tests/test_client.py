@@ -16,8 +16,9 @@ from activityinfo.exceptions import (
 )
 from activityinfo.models import (
     Database, FormSchema, FormRecord,
-    text_field, quantity_field, single_select_field
+    text_field, quantity_field, single_select_field, multi_select_field,
 )
+from activityinfo.models.field import Field
 
 
 # ─── FIXTURES ─────────────────────────────────────────────────────────────────
@@ -210,14 +211,58 @@ def test_text_field_creation():
 
 def test_quantity_field_creation():
     f = quantity_field("Nombre de bénéficiaires", code="NB", units="personnes")
-    assert f["type"] == "QUANTITY"
+    assert f["type"] == "quantity"  # type réel confirmé (minuscule), pas "QUANTITY"
     assert f["typeParameters"]["units"] == "personnes"
+    assert f["typeParameters"]["aggregation"] == "SUM"
 
 
 def test_single_select_field_creation():
     f = single_select_field("Sexe", ["Homme", "Femme", "Autre"], code="SEXE")
-    assert f["type"] == "SINGLE_SELECTION"
+    # Type réel confirmé : "enumerated" avec cardinality "single" — il
+    # n'existe pas de type "SINGLE_SELECTION" séparé côté serveur.
+    assert f["type"] == "enumerated"
+    assert f["typeParameters"]["cardinality"] == "single"
     assert len(f["typeParameters"]["values"]) == 3
+
+
+def test_multi_select_field_creation():
+    f = multi_select_field("Besoins", ["Eau", "Nourriture", "Abri"], code="NEEDS")
+    assert f["type"] == "enumerated"
+    assert f["typeParameters"]["cardinality"] == "multiple"
+
+
+def test_field_from_dict_enumerated():
+    """Vérifie le parsing d'un vrai champ 'enumerated' tel que renvoyé
+    par le serveur (confirmé sur un schéma réel)."""
+    data = {
+        "id": "f1", "label": "Sexe", "type": "enumerated", "code": "SEXE",
+        "required": False, "key": False,
+        "typeParameters": {
+            "cardinality": "single",
+            "presentation": "automatic",
+            "values": [
+                {"id": "o1", "label": "Homme"},
+                {"id": "o2", "label": "Femme"},
+            ],
+        },
+    }
+    f = Field.from_dict(data)
+    assert f.type == "enumerated"
+    assert f.cardinality == "single"
+    assert len(f.options) == 2
+    assert f.options[0].label == "Homme"
+
+
+def test_field_from_dict_quantity_lowercase():
+    """Le serveur renvoie 'quantity' en minuscule, pas 'QUANTITY'."""
+    data = {
+        "id": "f1", "label": "Age", "type": "quantity", "code": "AGE",
+        "required": False, "key": False,
+        "typeParameters": {"units": "ans", "aggregation": "SUM"},
+    }
+    f = Field.from_dict(data)
+    assert f.type == "quantity"
+    assert f.units == "ans"
 
 
 def test_form_schema_get_field():
@@ -328,6 +373,61 @@ def test_update_form_schema_is_post_with_nested_response(mock_req, client):
     updated = client.update_form_schema(schema)
     assert mock_req.call_args.args[0] == "POST"
     assert updated.label == "Test modifié"
+
+
+@patch("requests.Session.request")
+def test_add_field_appends_and_uploads(mock_req, client):
+    """add_field() doit : 1) lire le schéma existant, 2) y ajouter le
+    nouveau champ, 3) poster le schéma complet mis à jour."""
+    from activityinfo.models.field import text_field
+    mock_req.side_effect = [
+        make_mock_response(200, {  # GET schema existant (1 champ)
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
+            ],
+        }),
+        make_mock_response(200, {  # POST update -> schéma avec 2 champs
+            "forms": [{"id": "form001", "schema": {
+                "id": "form001", "label": "Test", "databaseId": "db001",
+                "elements": [
+                    {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                     "code": "NOM", "required": False, "key": False},
+                    {"id": "f2", "label": "Commentaire", "type": "FREE_TEXT",
+                     "code": "COMMENT", "required": False, "key": False},
+                ],
+            }}]
+        }),
+    ]
+    updated = client.add_field("form001", text_field("Commentaire", code="COMMENT"))
+    assert len(updated.fields) == 2
+    assert mock_req.call_args_list[1].args[0] == "POST"
+
+
+@patch("requests.Session.request")
+def test_add_field_avoids_code_collision(mock_req, client):
+    """Si le code du nouveau champ existe déjà, add_field() doit en
+    générer un autre plutôt que d'envoyer un schéma avec un code en
+    double au serveur (comme le fait addFormField() côté R)."""
+    from activityinfo.models.field import text_field
+    mock_req.side_effect = [
+        make_mock_response(200, {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
+            ],
+        }),
+        make_mock_response(200, {"forms": [{"id": "form001", "schema": {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [],
+        }}]}),
+    ]
+    client.add_field("form001", text_field("Nom bis", code="NOM"))
+    sent_json = mock_req.call_args_list[1].kwargs.get("json")
+    sent_codes = [e.get("code") for e in sent_json["elements"]]
+    assert sent_codes.count("NOM") == 1  # pas de doublon envoyé au serveur
 
 
 if __name__ == "__main__":
