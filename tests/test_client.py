@@ -505,5 +505,78 @@ def test_delete_field_requires_exactly_one_identifier(mock_req, client):
         client.delete_field("form001", field_id="f1", code="NOM")
 
 
+def test_field_relevance_rule_uses_condition_key():
+    """La clé JSON réelle est 'relevanceCondition', pas 'relevanceRule'
+    (confirmé dans le code source R : schema$relevanceCondition <-
+    relevanceRule). Avant ce correctif, une règle de pertinence existante
+    était silencieusement perdue à la lecture, et impossible à écrire."""
+    data = {
+        "id": "f1", "label": "Are you pregnant", "type": "enumerated",
+        "required": True, "key": False,
+        "relevanceCondition": "SEX != 'Male'",
+        "typeParameters": {"cardinality": "single", "values": []},
+    }
+    f = Field.from_dict(data)
+    assert f.relevance_rule == "SEX != 'Male'"
+
+    d = f.to_dict()
+    assert d["relevanceCondition"] == "SEX != 'Male'"
+    assert "relevanceRule" not in d
+
+
+@patch("requests.Session.request")
+def test_add_field_after_inserts_at_right_position(mock_req, client):
+    """add_field(after='NOM') doit insérer juste après le champ NOM,
+    pas à la fin."""
+    from activityinfo.models.field import text_field
+    mock_req.side_effect = [
+        make_mock_response(200, {  # GET schema (2 champs : NOM, AGE)
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
+                {"id": "f2", "label": "Age", "type": "quantity",
+                 "code": "AGE", "required": False, "key": False},
+            ],
+        }),
+        make_mock_response(200, {"forms": [{"id": "form001", "schema": {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [],
+        }}]}),
+    ]
+    client.add_field(
+        "form001", text_field("Note", code="NOTE"), after="NOM"
+    )
+    sent_json = mock_req.call_args_list[1].kwargs.get("json")
+    sent_codes = [e.get("code") for e in sent_json["elements"]]
+    assert sent_codes == ["NOM", "NOTE", "AGE"]  # inséré entre NOM et AGE
+
+
+@patch("requests.Session.request")
+def test_add_field_after_not_found_appends_at_end(mock_req, client):
+    """Si le code passé à after= n'existe pas, on ajoute à la fin plutôt
+    que de planter."""
+    from activityinfo.models.field import text_field
+    mock_req.side_effect = [
+        make_mock_response(200, {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [
+                {"id": "f1", "label": "Nom", "type": "FREE_TEXT",
+                 "code": "NOM", "required": False, "key": False},
+            ],
+        }),
+        make_mock_response(200, {"forms": [{"id": "form001", "schema": {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [],
+        }}]}),
+    ]
+    client.add_field(
+        "form001", text_field("Note", code="NOTE"), after="INEXISTANT"
+    )
+    sent_json = mock_req.call_args_list[1].kwargs.get("json")
+    sent_codes = [e.get("code") for e in sent_json["elements"]]
+    assert sent_codes == ["NOM", "NOTE"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
