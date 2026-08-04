@@ -21,7 +21,7 @@ Les méthodes ci-dessous sont classées par niveau de confiance :
 
 - HAUTE CONFIANCE : la structure de la requête et de la réponse a été
   confirmée en lisant le code source du package R correspondant.
-- BEST-EFFORT (⚠️ non testé en direct) : reconstruit fidèlement à partir du
+- BEST-EFFORT (non testé en direct) : reconstruit fidèlement à partir du
   code R, mais jamais exécuté contre un vrai serveur ActivityInfo depuis cet
   environnement. À tester prudemment (petit volume de données) avant tout
   usage en production : import_records/import_dataframe, add_form,
@@ -220,7 +220,7 @@ class ActivityInfoClient:
         Crée un nouveau formulaire dans une base de données.
         Équivalent R : addForm()  →  POST /resources/databases/{id}/forms
 
-        ⚠️ BEST-EFFORT : reconstruit fidèlement à partir du code source R
+        BEST-EFFORT : reconstruit fidèlement à partir du code source R
         (payload imbriqué formResource/formClass, réponse imbriquée sous
         forms[i].schema), mais jamais testé en direct depuis cet
         environnement. Teste d'abord avec un formulaire simple avant un
@@ -294,7 +294,7 @@ class ActivityInfoClient:
         Équivalent R : deleteForm()  →  POST /resources/databases/{id}
         avec un diff de type resourceDeletions.
 
-        ⚠️ Changement de signature par rapport à la version précédente :
+        Changement de signature par rapport à la version précédente :
         database_id est désormais requis, car l'API réelle exprime la
         suppression d'un formulaire comme une mise à jour de la base de
         données qui le contient (il n'existe pas de DELETE /form/{id}).
@@ -340,7 +340,7 @@ class ActivityInfoClient:
         """
         Récupère tous les enregistrements d'un formulaire.
 
-        ⚠️ BEST-EFFORT : il n'existe PAS d'endpoint REST direct
+        BEST-EFFORT : il n'existe PAS d'endpoint REST direct
         "liste des enregistrements d'un formulaire" dans l'API réelle
         (contrairement à ce que la version précédente supposait, avec
         pagination par curseur inventée). La vraie méthode consiste à
@@ -527,7 +527,7 @@ class ActivityInfoClient:
         Importe plusieurs enregistrements en masse (job asynchrone).
         Équivalent R : importRecords()
 
-        ⚠️ BEST-EFFORT — RISQUE ÉLEVÉ, NON TESTÉ EN DIRECT.
+        BEST-EFFORT — RISQUE ÉLEVÉ, NON TESTÉ EN DIRECT.
         L'import réel en 3 étapes (mise en scène du fichier via
         POST /resources/imports/stage[/direct], upload du contenu au
         format "LINE DELIMITED JSON RECORDS" vers l'URL renvoyée, puis
@@ -610,7 +610,7 @@ class ActivityInfoClient:
         Importe un DataFrame pandas dans un formulaire ActivityInfo.
         Bonus Python (pas d'équivalent direct en R).
 
-        ⚠️ Voir les avertissements de import_records() : le mécanisme
+        Voir les avertissements de import_records() : le mécanisme
         d'import réel n'a pas pu être testé en direct depuis cet
         environnement.
 
@@ -793,7 +793,7 @@ class ActivityInfoClient:
         POST /resources/query/columns (réponse au format colonnes,
         reconstituée ici en lignes).
 
-        ⚠️ La reconstruction ligne-par-ligne à partir de la réponse
+        La reconstruction ligne-par-ligne à partir de la réponse
         colonnes n'a pas pu être testée en direct — voir get_records()
         pour les mêmes réserves.
         """
@@ -864,7 +864,7 @@ class ActivityInfoClient:
         """
         Récupère les données géographiques d'un formulaire en GeoJSON.
 
-        ⚠️ NON CONFIRMÉ : aucune trace de cet endpoint (sous quelque
+        NON CONFIRMÉ : aucune trace de cet endpoint (sous quelque
         forme que ce soit) dans le package R de référence. Il est
         possible qu'il n'existe pas, ou pas sous ce chemin. Utilisation
         à tes risques — signale-moi le résultat (succès ou 404) pour
@@ -923,7 +923,7 @@ class ActivityInfoClient:
         """
         Récupère le statut du compte utilisateur actuel.
 
-        ⚠️ NON DISPONIBLE : aucun endpoint équivalent trouvé dans le
+        NON DISPONIBLE : aucun endpoint équivalent trouvé dans le
         package R de référence. Plutôt que de renvoyer silencieusement
         des données incorrectes (comportement précédent), cette méthode
         lève explicitement une erreur.
