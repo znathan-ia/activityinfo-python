@@ -21,7 +21,7 @@ Les méthodes ci-dessous sont classées par niveau de confiance :
 
 - HAUTE CONFIANCE : la structure de la requête et de la réponse a été
   confirmée en lisant le code source du package R correspondant.
-- BEST-EFFORT (non testé en direct) : reconstruit fidèlement à partir du
+- BEST-EFFORT ( non testé en direct) : reconstruit fidèlement à partir du
   code R, mais jamais exécuté contre un vrai serveur ActivityInfo depuis cet
   environnement. À tester prudemment (petit volume de données) avant tout
   usage en production : import_records/import_dataframe, add_form,
@@ -220,7 +220,7 @@ class ActivityInfoClient:
         Crée un nouveau formulaire dans une base de données.
         Équivalent R : addForm()  →  POST /resources/databases/{id}/forms
 
-        BEST-EFFORT : reconstruit fidèlement à partir du code source R
+         BEST-EFFORT : reconstruit fidèlement à partir du code source R
         (payload imbriqué formResource/formClass, réponse imbriquée sous
         forms[i].schema), mais jamais testé en direct depuis cet
         environnement. Teste d'abord avec un formulaire simple avant un
@@ -355,13 +355,89 @@ class ActivityInfoClient:
             return self.update_form_schema(schema)
         return schema
 
+    def delete_field(self, form_id: str,
+                     field_id: str = None,
+                     code: str = None,
+                     label: str = None,
+                     upload: bool = True) -> FormSchema:
+        """
+        Supprime un champ d'un formulaire existant.
+        Équivalent R : deleteFormField()
+
+        Comme addFormField()/add_field(), il n'y a pas d'endpoint pour
+        supprimer un seul champ isolément : on récupère le schéma complet,
+        on retire le(s) champ(s) correspondant(s), puis on renvoie le
+        schéma entier via update_form_schema().
+
+        Fournis exactement UN des trois paramètres suivants pour
+        identifier le(s) champ(s) à supprimer :
+
+        Paramètres
+        ----------
+        form_id : str
+        field_id : str, optionnel
+            L'id technique du champ (ex: "cxvt00lmp3qwjded").
+        code : str, optionnel
+            Le code du champ (ex: "NOM").
+        label : str, optionnel
+            Le libellé du champ. Lève une ValidationError si plusieurs
+            champs partagent ce libellé (ambiguïté), comme le fait R —
+            utilise plutôt field_id ou code dans ce cas.
+        upload : bool
+            Si True (défaut), envoie la suppression au serveur. Si False,
+            renvoie le schéma local modifié sans rien envoyer.
+
+        Exemple
+        -------
+        >>> client.delete_field("form001", code="COMMENT")
+        """
+        provided = [p for p in (field_id, code, label) if p is not None]
+        if len(provided) != 1:
+            raise ValidationError(
+                "delete_field nécessite exactement un des paramètres "
+                "field_id, code ou label (pas zéro, pas plusieurs)."
+            )
+
+        schema = self.get_form_schema(form_id)
+
+        if label is not None:
+            matches = [f for f in schema.fields if f.label == label]
+            distinct_ids = {f.id for f in matches}
+            if len(distinct_ids) > 1:
+                raise ValidationError(
+                    f"Impossible de supprimer par label : {len(matches)} "
+                    f"champs partagent le libellé {label!r} dans le "
+                    f"formulaire {form_id}. Utilise field_id ou code à la "
+                    f"place pour lever l'ambiguïté."
+                )
+            to_remove = matches
+        elif code is not None:
+            to_remove = [f for f in schema.fields if f.code == code]
+        else:
+            to_remove = [f for f in schema.fields if f.id == field_id]
+
+        if not to_remove:
+            logger.warning(
+                f"delete_field : aucun champ correspondant à "
+                f"field_id={field_id!r} code={code!r} label={label!r} "
+                f"trouvé dans le formulaire {form_id}. Rien à supprimer."
+            )
+            return schema
+
+        remove_ids = {f.id for f in to_remove}
+        schema.fields = [f for f in schema.fields if f.id not in remove_ids]
+
+        if upload:
+            return self.update_form_schema(schema)
+        return schema
+
     def delete_form(self, database_id: str, form_id: str) -> None:
         """
         Supprime un formulaire.
         Équivalent R : deleteForm()  →  POST /resources/databases/{id}
         avec un diff de type resourceDeletions.
 
-        Changement de signature par rapport à la version précédente :
+         Changement de signature par rapport à la version précédente :
         database_id est désormais requis, car l'API réelle exprime la
         suppression d'un formulaire comme une mise à jour de la base de
         données qui le contient (il n'existe pas de DELETE /form/{id}).
@@ -594,7 +670,7 @@ class ActivityInfoClient:
         Importe plusieurs enregistrements en masse (job asynchrone).
         Équivalent R : importRecords()
 
-        BEST-EFFORT — RISQUE ÉLEVÉ, NON TESTÉ EN DIRECT.
+         BEST-EFFORT — RISQUE ÉLEVÉ, NON TESTÉ EN DIRECT.
         L'import réel en 3 étapes (mise en scène du fichier via
         POST /resources/imports/stage[/direct], upload du contenu au
         format "LINE DELIMITED JSON RECORDS" vers l'URL renvoyée, puis
@@ -677,7 +753,7 @@ class ActivityInfoClient:
         Importe un DataFrame pandas dans un formulaire ActivityInfo.
         Bonus Python (pas d'équivalent direct en R).
 
-        Voir les avertissements de import_records() : le mécanisme
+         Voir les avertissements de import_records() : le mécanisme
         d'import réel n'a pas pu être testé en direct depuis cet
         environnement.
 
@@ -860,7 +936,7 @@ class ActivityInfoClient:
         POST /resources/query/columns (réponse au format colonnes,
         reconstituée ici en lignes).
 
-        La reconstruction ligne-par-ligne à partir de la réponse
+         La reconstruction ligne-par-ligne à partir de la réponse
         colonnes n'a pas pu être testée en direct — voir get_records()
         pour les mêmes réserves.
         """
@@ -931,7 +1007,7 @@ class ActivityInfoClient:
         """
         Récupère les données géographiques d'un formulaire en GeoJSON.
 
-        NON CONFIRMÉ : aucune trace de cet endpoint (sous quelque
+         NON CONFIRMÉ : aucune trace de cet endpoint (sous quelque
         forme que ce soit) dans le package R de référence. Il est
         possible qu'il n'existe pas, ou pas sous ce chemin. Utilisation
         à tes risques — signale-moi le résultat (succès ou 404) pour
@@ -990,7 +1066,7 @@ class ActivityInfoClient:
         """
         Récupère le statut du compte utilisateur actuel.
 
-        NON DISPONIBLE : aucun endpoint équivalent trouvé dans le
+         NON DISPONIBLE : aucun endpoint équivalent trouvé dans le
         package R de référence. Plutôt que de renvoyer silencieusement
         des données incorrectes (comportement précédent), cette méthode
         lève explicitement une erreur.
