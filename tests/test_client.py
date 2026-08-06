@@ -578,5 +578,29 @@ def test_add_field_after_not_found_appends_at_end(mock_req, client):
     assert sent_codes == ["NOM", "NOTE"]
 
 
+@patch("requests.Session.request")
+def test_add_form_with_parent_form_id_creates_subform(mock_req, client):
+    """add_form(parent_form_id=...) doit renseigner le lien vers le parent
+    à la fois dans formResource.parentId ET formClass.parentFormId
+    (confirmé dans le code source R : formSchema() les fixe tous les
+    deux, pas seulement l'un ou l'autre)."""
+    def fake_response(*args, **kwargs):
+        sent = kwargs.get("json")
+        form_id = sent["formResource"]["id"]
+        return make_mock_response(200, {
+            "forms": [{"id": form_id, "schema": {
+                "id": form_id, "label": "Détails VBG", "databaseId": "db001",
+                "parentFormId": "parentform1", "elements": [],
+            }}]
+        })
+    mock_req.side_effect = fake_response
+
+    schema = client.add_form("db001", "Détails VBG", [], parent_form_id="parentform1")
+    sent_json = mock_req.call_args.kwargs.get("json")
+    assert sent_json["formResource"]["parentId"] == "parentform1"
+    assert sent_json["formClass"]["parentFormId"] == "parentform1"
+    assert schema.parent_form_id == "parentform1"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
