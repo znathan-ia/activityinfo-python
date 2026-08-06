@@ -312,9 +312,6 @@ l'indique clairement plutôt que d'afficher la page HTML brute.
 
 ## Bonnes pratiques avant une écriture
 
-Pour toute méthode marquée **best-effort** ci-dessus, ou avant une écriture
-sur un formulaire de production :
-
 ```python
 # 1. État avant modification
 schema = client.get_form_schema("form_id")
