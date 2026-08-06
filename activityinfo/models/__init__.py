@@ -4,7 +4,7 @@ from .field import (
     Field, FieldOption,
     text_field, narrative_field, quantity_field, date_field, month_field,
     single_select_field, multi_select_field, reference_field, geopoint_field,
-    calculated_field, section_field,
+    calculated_field, section_field, subform_field,
 )
 
 __all__ = [
@@ -13,5 +13,5 @@ __all__ = [
     "Field", "FieldOption",
     "text_field", "narrative_field", "quantity_field", "date_field", "month_field",
     "single_select_field", "multi_select_field", "reference_field", "geopoint_field",
-    "calculated_field", "section_field",
+    "calculated_field", "section_field", "subform_field",
 ]
