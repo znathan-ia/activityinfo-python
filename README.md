@@ -8,26 +8,7 @@ inspiré du package R officiel [bedatadriven/activityinfo-R](https://github.com/
 Ce package a été construit puis largement corrigé en comparant son comportement
 à celui du package R officiel (qui parle à la même API REST) et en le testant
 contre un vrai serveur. Toutes les méthodes n'ont pas le même niveau de
-certitude :
-
-- **Haute confiance** (structure vérifiée dans le code source R **et**
-  testée contre un vrai serveur) : `get_databases`, `get_database`,
-  `get_database_resources`, `get_form_schema` (y compris sous-formulaires),
-  `get_record`, `add_record`/`update_record`/`delete_record`,
-  `recover_record`, `get_record_history`, `get_database_users`,
-  `delete_database_user`, `get_job_status`, `get_attachment`, `add_field`,
-  `delete_field`.
-- **Best-effort** (reconstruit fidèlement à partir du code source R, mais
-  jamais testé en direct contre un vrai serveur) : `add_form`,
-  `import_records`/`import_dataframe` (le plus risqué — teste avec 1-2
-  lignes d'abord), `get_records`/`to_dataframe`/`query_table` (reconstruction
-  du format colonnes), `get_form_geojson` (existence même de l'endpoint non
-  confirmée), `add_database_user`/`update_database_user_role` (payload rôle
-  imbriqué), le positionnement `after=`/`position=` de `add_field`.
-
-Teste toujours les fonctionnalités best-effort sur un formulaire non-critique
-avant un usage réel, et vérifie après coup qu'aucun champ existant n'a été
-perturbé (voir [Bonnes pratiques](#bonnes-pratiques-avant-une-écriture)).
+certitude. 
 
 ## Installation
 
