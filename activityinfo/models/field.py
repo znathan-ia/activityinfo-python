@@ -3,7 +3,6 @@ activityinfo.models.field
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 Modèles pour les champs de formulaires ActivityInfo.
 Inspiré de fieldSchema() du package R bedatadriven.
-
 """
 
 from dataclasses import dataclass, field
@@ -336,6 +335,47 @@ def calculated_field(label: str, formula: str, code: str = None) -> dict:
     d = {"id": generate_cuid(), "label": label, "type": "calculated",
          "typeParameters": {"formula": formula}}
     if code: d["code"] = code
+    return d
+
+
+def subform_field(label: str, subform_id: str, code: str = None,
+                  relevance_rule: str = None,
+                  required: bool = False) -> dict:
+    """
+    Crée un champ qui embarque un sous-formulaire dans l'écran de saisie
+    du formulaire parent. Confirmé dans le code source R
+    (subformFieldSchema()) : type réel "subform", typeParameters =
+    {"formId": subform_id}.
+
+    À utiliser avec add_field() pour ajouter ce champ au formulaire
+    PARENT après avoir créé le sous-formulaire lui-même via
+    client.add_form(..., parent_form_id=...).
+
+    Paramètres
+    ----------
+    label : str
+    subform_id : str
+        L'id du sous-formulaire déjà créé (renvoyé par add_form()).
+    relevance_rule : str, optionnel
+        Règle de pertinence (voir Field.relevance_rule) pour n'afficher
+        le sous-formulaire que sous certaines conditions, ex :
+        "INCLUT_VBG == 'Oui'".
+
+    Exemple
+    -------
+    >>> client.add_field("form_5w_id", subform_field(
+    ...     "Détails VBG", subform_id="sub123",
+    ...     relevance_rule="INCLUT_VBG == 'Oui'"
+    ... ))
+    """
+    from ..utils.cuid import generate_cuid
+    d = {
+        "id": generate_cuid(), "label": label, "type": "subform",
+        "required": required,
+        "typeParameters": {"formId": subform_id},
+    }
+    if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
