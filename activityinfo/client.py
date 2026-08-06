@@ -216,7 +216,8 @@ class ActivityInfoClient:
                  elements: List[dict],
                  folder_id: str = None,
                  parent_form_id: str = None,
-                 description: str = None) -> FormSchema:
+                 description: str = None,
+                 form_id: str = None) -> FormSchema:
         """
         Crée un nouveau formulaire (ou sous-formulaire) dans une base de
         données.
@@ -224,9 +225,38 @@ class ActivityInfoClient:
 
         BEST-EFFORT : reconstruit fidèlement à partir du code source R
         (payload imbriqué formResource/formClass, réponse imbriquée sous
-        forms[i].schema), mais jamais testé en direct depuis cet
-        environnement. Teste d'abord avec un formulaire simple avant un
-        usage en production.
+        forms[i].schema). Le cas général (formulaire top-level) a été
+        testé en direct. Le cas sous-formulaire (parent_form_id) a révélé
+        une contrainte serveur importante — voir ci-dessous.
+
+        IMPORTANT — Créer un SOUS-FORMULAIRE nécessite un ordre précis
+        -------------------------------------------------------------------
+        Confirmé par un message d'erreur serveur explicite obtenu en test
+        réel : "Subforms cannot be added to a database without a
+        corresponding subform field. First update the parent schema with
+        a new subform field, and then update the subform."
+
+        Autrement dit, l'ordre est l'INVERSE de ce qu'on pourrait
+        supposer :
+        1. Génère d'abord l'id du futur sous-formulaire toi-même
+           (`from activityinfo.utils.cuid import generate_cuid`).
+        2. Ajoute un champ `subform_field(..., subform_id=cet_id)` au
+           formulaire PARENT via `add_field()` — AVANT que le
+           sous-formulaire existe.
+        3. Crée ENSUITE le sous-formulaire lui-même via `add_form()`, en
+           forçant `form_id=` sur ce même id pour qu'il corresponde à ce
+           que le champ du parent référence déjà.
+
+        Exemple
+        -------
+        >>> from activityinfo.utils.cuid import generate_cuid
+        >>> from activityinfo import subform_field
+        >>> new_id = generate_cuid()
+        >>> client.add_field(parent_form_id, subform_field(
+        ...     "Détails VBG", subform_id=new_id, code="DETAILS_VBG"))
+        >>> client.add_form(
+        ...     "db_id", "Détails VBG", elements,
+        ...     parent_form_id=parent_form_id, form_id=new_id)
 
         Paramètres
         ----------
@@ -238,22 +268,15 @@ class ActivityInfoClient:
             ID du dossier parent (par défaut, la base elle-même). Ignoré
             si parent_form_id est fourni.
         parent_form_id : str, optionnel
-            Pour créer un SOUS-FORMULAIRE : l'id du formulaire parent.
-            Confirmé dans le code source R (formSchema()) : le lien vers
-            le parent doit être présent à la fois dans l'arbre des
-            ressources (parentId) ET dans le schéma envoyé
-            (formClass.parentFormId) — les deux sont donc renseignés
-            automatiquement quand ce paramètre est fourni.
+            Pour créer un sous-formulaire : l'id du formulaire parent.
+            Voir l'avertissement ci-dessus sur l'ordre des opérations.
         description : str, optionnel
-
-        Exemple — créer un sous-formulaire
-        ------------------------------------
-        >>> client.add_form(
-        ...     "db001", "Détails VBG", elements,
-        ...     parent_form_id="ID_DU_FORMULAIRE_5W_PARENT"
-        ... )
+        form_id : str, optionnel
+            Force l'id du formulaire créé plutôt que d'en générer un
+            nouveau. Indispensable pour créer un sous-formulaire (voir
+            ci-dessus) ; sinon laisse vide.
         """
-        form_id = generate_cuid()
+        form_id = form_id or generate_cuid()
         parent_id = parent_form_id or folder_id or database_id
 
         form_class: Dict[str, Any] = {
