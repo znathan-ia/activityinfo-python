@@ -8,7 +8,7 @@ inspiré du package R officiel [bedatadriven/activityinfo-R](https://github.com/
 Ce package a été construit puis largement corrigé en comparant son comportement
 à celui du package R officiel (qui parle à la même API REST) et en le testant
 contre un vrai serveur. Toutes les méthodes n'ont pas le même niveau de
-certitude. 
+certitude.
 
 ## Installation
 
