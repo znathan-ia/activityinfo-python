@@ -126,7 +126,7 @@ client.delete_field("form_id", code="COMMENT")
 ### Règles de pertinence (afficher un champ sous condition)
 
 La clé JSON réelle est `relevanceCondition` (le paramètre Python reste
-`relevance_rule`, comme côté R). Exemple confirmé par la doc officielle R —
+`relevance_rule`, comme côté R). Exemple confirmé par la doc officielle R -
 comparaison sur un champ du **même** formulaire :
 
 ```python
