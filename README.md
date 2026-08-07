@@ -48,7 +48,7 @@ for db in databases:
     print(db.id, db.label)
 
 # Ressources d'une base (formulaires, dossiers, sous-formulaires...)
-# NB : il n'existe pas d'endpoint séparé pour ça — get_database_resources()
+# NB : il n'existe pas d'endpoint séparé pour ça -get_database_resources()
 # lit le champ "resources" de l'arbre complet de la base.
 resources = client.get_database_resources("db_id")
 forms = [r for r in resources if r.is_form]
@@ -65,7 +65,7 @@ new_db = client.add_database("Enquête Flash 2025")
 ### Types de champs réels
 
 Le vocabulaire des types de champs de l'API a une casse volontairement
-incohérente — ce n'est pas une coquille de notre part, c'est ainsi que le
+incohérente -ce n'est pas une coquille de notre part, c'est ainsi que le
 serveur les renvoie réellement : `"FREE_TEXT"` et `"NARRATIVE"` restent en
 majuscules, mais tous les autres types (`"quantity"`, `"date"`,
 `"enumerated"`, `"reference"`, `"calculated"`, `"geopoint"`, `"section"`,
@@ -106,7 +106,7 @@ new_form = client.add_form(
 ### Ajouter / supprimer un champ sur un formulaire existant
 
 Il n'existe pas d'endpoint pour ajouter ou supprimer un seul champ isolément
-— `add_field()`/`delete_field()` récupèrent le schéma complet, le modifient,
+-`add_field()`/`delete_field()` récupèrent le schéma complet, le modifient,
 et renvoient le tout via `update_form_schema()`. Elles reproduisent les
 mêmes garde-fous que le package R (`addFormField()`/`deleteFormField()`) :
 collision d'id/code évitée automatiquement à l'ajout, ambiguïté de label
@@ -138,7 +138,7 @@ single_select_field(
 
 Pour référencer un champ d'un formulaire **parent** depuis un sous-formulaire
 (syntaxe confirmée dans le contexte des requêtes, probable mais non garantie
-en `relevanceCondition` — à vérifier après test) :
+en `relevanceCondition` -à vérifier après test) :
 
 ```python
 relevance_rule = "parent.CODE_DU_CHAMP_PARENT == 'Valeur'"
@@ -180,7 +180,7 @@ client.add_record(
 ## Enregistrements
 
 ```python
-# Lire tous les enregistrements d'un formulaire (best-effort — reconstruit
+# Lire tous les enregistrements d'un formulaire (best-effort -reconstruit
 # via le mécanisme de requêtes en colonnes, il n'existe pas d'endpoint
 # "liste paginée" direct dans l'API réelle)
 records = client.get_records("form_id")
@@ -211,7 +211,7 @@ history = client.get_record_history("form_id", record.record_id)
 
 ## Intégration pandas
 
-Best-effort — voir la note sur `import_records()` plus haut. Teste avec
+Best-effort -voir la note sur `import_records()` plus haut. Teste avec
 un petit volume avant tout usage réel.
 
 ```python
