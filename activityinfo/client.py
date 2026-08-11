@@ -15,6 +15,7 @@ Ce client a été réécrit en comparant son comportement à celui du package R
 officiel bedatadriven/activityinfo-R (qui parle à la même API REST)
 """
 
+
 import logging
 import re
 import time
@@ -636,13 +637,18 @@ class ActivityInfoClient:
         """
         Reconstitue, pour chaque colonne demandée, une liste de `rows`
         valeurs à partir de la réponse de /resources/query/columns.
-        Adapté de parseColumnSet() côté R, qui gère 3 modes de stockage
-        possibles pour une colonne : "constant" (une seule valeur répétée),
-        "array" (une valeur par ligne), "empty" (colonne vide).
+
+        Structure réelle confirmée en direct (différente de ce que la
+        documentation R suggérait) : `data["columns"]` est un DICTIONNAIRE
+        indexé par id de colonne — {"_id": {"type": ..., "storage": ...,
+        "values": [...]}, ...} — pas une liste de {"id": ..., ...} comme
+        supposé initialement. Gère 3 modes de stockage par colonne :
+        "constant" (une seule valeur répétée), "array" (une valeur par
+        ligne), autre/absent (colonne vide).
         """
         result: Dict[str, List[Any]] = {}
-        for column in data.get("columns", []):
-            col_id = column.get("id")
+        columns = data.get("columns", {})
+        for col_id, column in columns.items():
             storage = column.get("storage")
             if storage == "constant":
                 result[col_id] = [column.get("value")] * rows
@@ -1256,4 +1262,3 @@ class ActivityInfoClient:
 
     def __repr__(self):
         return f"ActivityInfoClient(server={self._base_url!r})"
-
