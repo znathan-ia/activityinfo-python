@@ -12,24 +12,11 @@ Usage :
 IMPORTANT — Fiabilité des endpoints
 ------------------------------------
 Ce client a été réécrit en comparant son comportement à celui du package R
-officiel bedatadriven/activityinfo-R (qui parle à la même API REST), car la
-version précédente utilisait un préfixe d'URL incorrect (`/api/...` au lieu
-de `/resources/...`) et plusieurs endpoints inventés qui ne correspondent à
-rien de réel côté serveur.
-
-Les méthodes ci-dessous sont classées par niveau de confiance :
-
-- HAUTE CONFIANCE : la structure de la requête et de la réponse a été
-  confirmée en lisant le code source du package R correspondant.
-- BEST-EFFORT (non testé en direct) : reconstruit fidèlement à partir du
-  code R, mais jamais exécuté contre un vrai serveur ActivityInfo depuis cet
-  environnement. À tester prudemment (petit volume de données) avant tout
-  usage en production : import_records/import_dataframe, add_form,
-  get_records/to_dataframe/query_table (reconstruction du format colonnes),
-  get_form_geojson (existence de l'endpoint non confirmée).
+officiel bedatadriven/activityinfo-R (qui parle à la même API REST)
 """
 
 import logging
+import re
 import time
 from typing import Optional, List, Dict, Any, Iterator
 
@@ -39,6 +26,22 @@ from .utils.cuid import generate_cuid
 from .models.database import Database, DatabaseResource, DatabaseUser
 from .models.form import FormSchema, FormRecord
 from .models.field import Field
+
+# Contrainte confirmée dans le code source R (checkForm()) : les codes de
+# champs doivent commencer par une lettre, ne contenir que des lettres,
+# chiffres et underscores, et faire au plus 32 caractères. Le serveur
+# rejette silencieusement (400) tout code qui ne respecte pas ce format —
+# autant le détecter côté client avant l'envoi.
+_FIELD_CODE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
+
+
+def _validate_field_code(code: Optional[str]) -> None:
+    if code and not _FIELD_CODE_PATTERN.match(code):
+        raise ValidationError(
+            f"Code de champ invalide : {code!r} (doit commencer par une "
+            f"lettre, ne contenir que des lettres/chiffres/underscores, "
+            f"et faire au plus 32 caractères — {len(code)} actuellement)."
+        )
 
 logger = logging.getLogger("activityinfo")
 
@@ -277,6 +280,8 @@ class ActivityInfoClient:
             ci-dessus) ; sinon laisse vide.
         """
         form_id = form_id or generate_cuid()
+        for el in elements:
+            _validate_field_code(el.get("code"))
         parent_id = parent_form_id or folder_id or database_id
 
         form_class: Dict[str, Any] = {
@@ -380,6 +385,7 @@ class ActivityInfoClient:
         >>> client.add_field("form001", text_field("Commentaire", code="COMMENT"))
         >>> client.add_field("form001", text_field("Note", code="NOTE"), after="NOM")
         """
+        _validate_field_code(field_dict.get("code"))
         schema = self.get_form_schema(form_id)
         existing_ids = {f.id for f in schema.fields}
         existing_codes = {f.code for f in schema.fields if f.code}
@@ -743,7 +749,8 @@ class ActivityInfoClient:
     def import_records(self, form_id: str,
                        records: List[Dict[str, Any]],
                        wait: bool = True,
-                       poll_interval: int = 2) -> dict:
+                       poll_interval: int = 2,
+                       parent_record_id: str = None) -> dict:
         """
         Importe plusieurs enregistrements en masse (job asynchrone).
         Équivalent R : importRecords()
@@ -758,29 +765,121 @@ class ActivityInfoClient:
         activityinfo.org ici). Teste d'abord avec 1 ou 2 lignes sur un
         formulaire de test avant tout usage en production.
 
+        NB : cette méthode récupère d'abord le schéma du formulaire (un
+        appel réseau de plus) pour reproduire deux traductions que R
+        applique avant l'envoi, confirmées dans son code source
+        (matchColumn(), prepareEnumImport()) :
+        - Les clés de `records` peuvent être des codes, des labels, ou
+          des ids bruts de champs — elles sont résolues vers l'id brut
+          réellement attendu par le format d'import.
+        - Pour un champ "enumerated", la valeur fournie doit être le
+          label d'une option (ex: "Oui", "Viol") — elle est convertie en
+          l'id interne de cette option avant l'envoi. Une valeur qui ne
+          correspond à aucune option lève une ValidationError plutôt que
+          d'envoyer une valeur invalide silencieusement.
+
+        Types de champs non couverts par cette conversion (envoyés
+        tels quels, non vérifiés) : reference (attend probablement l'id
+        brut de l'enregistrement référencé, pas un label), date, geopoint.
+
         Paramètres
         ----------
         form_id : str
+            Peut être un formulaire top-level ou un sous-formulaire (avec
+            parent_record_id renseigné dans ce dernier cas).
         records : List[dict]
-            Liste de dictionnaires {code_champ: valeur}. Chaque dict peut
-            optionnellement contenir une clé "_id" pour fixer l'id de
-            l'enregistrement.
+            Liste de dictionnaires {code_ou_label_champ: valeur}. Chaque
+            dict peut optionnellement contenir :
+            - "_id" pour fixer l'id de l'enregistrement
+            - "_parent_id" pour fixer, ligne par ligne, l'enregistrement
+              parent (utile si les enregistrements importés ont des
+              parents différents) — prioritaire sur parent_record_id.
         wait : bool
             Attendre la fin du job (défaut : True)
         poll_interval : int
             Intervalle de polling en secondes (défaut : 2)
+        parent_record_id : str, optionnel
+            Id de l'enregistrement parent, appliqué à tous les records
+            qui n'ont pas de "_parent_id" propre. Obligatoire (d'une
+            façon ou d'une autre) si form_id est un sous-formulaire.
         """
         if not records:
             logger.warning("import_records : liste de records vide, rien à faire.")
             return {}
 
-        field_ids = sorted({k for r in records for k in r.keys() if k != "_id"})
+        schema = self.get_form_schema(form_id)
+        field_by_id = {f.id: f for f in schema.fields}
+        field_by_code = {f.code.lower(): f for f in schema.fields if f.code}
+        field_by_label = {f.label.lower(): f for f in schema.fields if f.label}
+
+        def resolve_field(key: str) -> Field:
+            if key in field_by_id:
+                return field_by_id[key]
+            f = field_by_code.get(key.lower())
+            if f:
+                return f
+            f = field_by_label.get(key.lower())
+            if f:
+                return f
+            raise ValidationError(
+                f"import_records : aucun champ ne correspond à la colonne "
+                f"{key!r} dans le formulaire {form_id} (ni code, ni label, "
+                f"ni id de champ)."
+            )
+
+        def convert_value(field: Field, value: Any) -> Any:
+            if value is None:
+                return None
+            try:
+                if value != value:  # NaN (float, numpy, pandas.NA compatible)
+                    return None
+            except Exception:
+                pass
+
+            if field.type == "enumerated":
+                options_by_label = {o.label.lower(): o.id for o in field.options}
+                if field.cardinality == "multiple":
+                    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+                    ids = []
+                    for v in raw_values:
+                        oid = options_by_label.get(str(v).strip().lower())
+                        if oid is None:
+                            raise ValidationError(
+                                f"import_records : option {v!r} introuvable pour "
+                                f"le champ {field.code or field.id!r} (options "
+                                f"valides : {[o.label for o in field.options]})."
+                            )
+                        ids.append(oid)
+                    return ids
+                else:
+                    oid = options_by_label.get(str(value).strip().lower())
+                    if oid is None:
+                        raise ValidationError(
+                            f"import_records : option {value!r} introuvable pour "
+                            f"le champ {field.code or field.id!r} (options "
+                            f"valides : {[o.label for o in field.options]})."
+                        )
+                    return oid
+            return value
+
+        user_keys = sorted({
+            k for r in records for k in r.keys() if k not in ("_id", "_parent_id")
+        })
+        resolved = {k: resolve_field(k) for k in user_keys}
+        field_ids = [resolved[k].id for k in user_keys]
+
+        has_parent = parent_record_id is not None or any(
+            r.get("_parent_id") for r in records
+        )
 
         lines = ["LINE DELIMITED JSON RECORDS", str(len(records)),
                  self._to_json_line(field_ids)]
         for r in records:
             record_id = r.get("_id") or generate_cuid()
-            row = [record_id] + [r.get(f) for f in field_ids]
+            row = [record_id]
+            if has_parent:
+                row.append(r.get("_parent_id") or parent_record_id)
+            row += [convert_value(resolved[k], r.get(k)) for k in user_keys]
             lines.append(self._to_json_line(row))
 
         content = "\n".join(lines)
@@ -1157,3 +1256,4 @@ class ActivityInfoClient:
 
     def __repr__(self):
         return f"ActivityInfoClient(server={self._base_url!r})"
+
