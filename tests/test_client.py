@@ -128,7 +128,10 @@ def test_get_form_schema_not_found(mock_req, client):
 def test_get_records_paginated(mock_req, client):
     # get_records() sans `fields` : 1) lit le schéma pour connaître les
     # champs, 2) interroge /query/columns en paginant via `window`
-    # jusqu'à couvoir `totalRows`. Simule 2 pages de résultats.
+    # jusqu'à couvrir `totalRows`. Simule 2 pages de résultats.
+    #
+    # Structure de "columns" confirmée en conditions réelles : un
+    # DICTIONNAIRE indexé par id de colonne, pas une liste.
     mock_req.side_effect = [
         make_mock_response(200, {  # GET /resources/form/form001/schema
             "id": "form001", "label": "Enquête", "databaseId": "db001",
@@ -139,19 +142,19 @@ def test_get_records_paginated(mock_req, client):
         }),
         make_mock_response(200, {  # POST /resources/query/columns (page 1)
             "rows": 2, "totalRows": 3,
-            "columns": [
-                {"id": "_id", "storage": "array", "values": ["r1", "r2"]},
-                {"id": "_lastEditTime", "storage": "array", "values": [1000, 1001]},
-                {"id": "NOM", "storage": "array", "values": ["Alice", "Bob"]},
-            ],
+            "columns": {
+                "_id": {"storage": "array", "values": ["r1", "r2"]},
+                "_lastEditTime": {"storage": "array", "values": [1000, 1001]},
+                "NOM": {"storage": "array", "values": ["Alice", "Bob"]},
+            },
         }),
         make_mock_response(200, {  # POST /resources/query/columns (page 2)
             "rows": 1, "totalRows": 3,
-            "columns": [
-                {"id": "_id", "storage": "array", "values": ["r3"]},
-                {"id": "_lastEditTime", "storage": "array", "values": [1002]},
-                {"id": "NOM", "storage": "array", "values": ["Charlie"]},
-            ],
+            "columns": {
+                "_id": {"storage": "array", "values": ["r3"]},
+                "_lastEditTime": {"storage": "array", "values": [1002]},
+                "NOM": {"storage": "array", "values": ["Charlie"]},
+            },
         }),
     ]
     records = client.get_records("form001")
@@ -160,6 +163,37 @@ def test_get_records_paginated(mock_req, client):
     assert records[0].values["NOM"] == "Alice"
     assert records[2].values["NOM"] == "Charlie"
     assert isinstance(records[0], FormRecord)
+
+
+@patch("requests.Session.request")
+def test_get_records_matches_real_server_response(mock_req, client):
+    """Vérifie le parsing avec une réponse serveur réelle capturée en
+    conditions réelles (colonnes _id/_lastEditTime, 6 lignes, pas de
+    champ de données supplémentaire)."""
+    mock_req.side_effect = [
+        make_mock_response(200, {
+            "id": "form001", "label": "Test", "databaseId": "db001",
+            "elements": [],
+        }),
+        make_mock_response(200, {
+            "offset": 0, "rows": 6, "totalRows": 6,
+            "columns": {
+                "_id": {"type": "STRING", "storage": "array", "values": [
+                    "cmsoy3wdq0001run77z8me0h4", "cmsoy3wdq00029kv78x0aiwwl",
+                    "cmsoy3wdq0003wa59hha3cc3s", "cmsoy3wdq0004mw5rdmmm47qs",
+                    "cmsoy3wdq000553wi31zoml3u", "cmsoy3wdq0006qvn064ci7v28",
+                ]},
+                "_lastEditTime": {"type": "NUMBER", "storage": "array", "values": [
+                    1786469995.0, 1786469995.0, 1786469995.0,
+                    1786469995.0, 1786469995.0, 1786469995.0,
+                ]},
+            },
+        }),
+    ]
+    records = client.get_records("form001")
+    assert len(records) == 6
+    assert records[0].record_id == "cmsoy3wdq0001run77z8me0h4"
+    assert records[0].last_edit_time == 1786469995.0
 
 
 @patch("requests.Session.request")
