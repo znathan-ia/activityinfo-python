@@ -5,6 +5,7 @@ Modèles pour les champs de formulaires ActivityInfo.
 Inspiré de fieldSchema() du package R bedatadriven.
 """
 
+
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Dict, Literal
 
@@ -209,7 +210,7 @@ class Field:
 
 def text_field(label: str, code: str = None, description: str = None,
                required: bool = False, key: bool = False,
-               barcode: bool = False) -> dict:
+               barcode: bool = False, relevance_rule: str = None) -> dict:
     """Crée un champ texte libre. Équivalent de textFieldSchema() en R."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "FREE_TEXT",
@@ -217,44 +218,54 @@ def text_field(label: str, code: str = None, description: str = None,
     if code: d["code"] = code
     if description: d["description"] = description
     if barcode: d["typeParameters"] = {"barcode": True}
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
 def narrative_field(label: str, code: str = None,
-                    required: bool = False) -> dict:
+                    required: bool = False,
+                    relevance_rule: str = None) -> dict:
     """Crée un champ texte long (narratif)."""
     from ..utils.cuid import generate_cuid
-    return {"id": generate_cuid(), "label": label, "type": "NARRATIVE",
-            "required": required, "code": code}
+    d = {"id": generate_cuid(), "label": label, "type": "NARRATIVE",
+         "required": required, "code": code}
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
+    return d
 
 
 def quantity_field(label: str, code: str = None, units: str = "",
                    aggregation: str = "SUM",
-                   required: bool = False) -> dict:
+                   required: bool = False,
+                   relevance_rule: str = None) -> dict:
     """Crée un champ numérique. Équivalent de quantityFieldSchema() en R."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "quantity",
          "required": required,
          "typeParameters": {"units": units, "aggregation": aggregation}}
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
-def date_field(label: str, code: str = None, required: bool = False) -> dict:
+def date_field(label: str, code: str = None, required: bool = False,
+               relevance_rule: str = None) -> dict:
     """Crée un champ date."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "date",
          "required": required}
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
-def month_field(label: str, code: str = None, required: bool = False) -> dict:
+def month_field(label: str, code: str = None, required: bool = False,
+                relevance_rule: str = None) -> dict:
     """Crée un champ mois (format YYYY-MM)."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "month",
          "required": required}
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
@@ -283,7 +294,8 @@ def single_select_field(label: str, options: List[str], code: str = None,
 
 
 def multi_select_field(label: str, options: List[str], code: str = None,
-                        required: bool = False) -> dict:
+                        required: bool = False,
+                        relevance_rule: str = None) -> dict:
     """Crée un champ sélection multiple — type réel "enumerated" avec
     typeParameters.cardinality = "multiple"."""
     from ..utils.cuid import generate_cuid
@@ -298,11 +310,13 @@ def multi_select_field(label: str, options: List[str], code: str = None,
         },
     }
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
 def reference_field(label: str, form_id: str, code: str = None,
-                    required: bool = False) -> dict:
+                    required: bool = False,
+                    relevance_rule: str = None) -> dict:
     """Crée un champ référence vers un autre formulaire."""
     from ..utils.cuid import generate_cuid
     d = {
@@ -314,27 +328,32 @@ def reference_field(label: str, form_id: str, code: str = None,
         },
     }
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
 def geopoint_field(label: str, code: str = None,
                    required: bool = False,
-                   manual_entry_allowed: bool = True) -> dict:
+                   manual_entry_allowed: bool = True,
+                   relevance_rule: str = None) -> dict:
     """Crée un champ géolocalisation (latitude/longitude)."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "geopoint",
          "required": required,
          "typeParameters": {"manualEntryAllowed": manual_entry_allowed}}
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
-def calculated_field(label: str, formula: str, code: str = None) -> dict:
+def calculated_field(label: str, formula: str, code: str = None,
+                     relevance_rule: str = None) -> dict:
     """Crée un champ calculé à partir d'une formule."""
     from ..utils.cuid import generate_cuid
     d = {"id": generate_cuid(), "label": label, "type": "calculated",
          "typeParameters": {"formula": formula}}
     if code: d["code"] = code
+    if relevance_rule: d["relevanceCondition"] = relevance_rule
     return d
 
 
@@ -379,11 +398,26 @@ def subform_field(label: str, subform_id: str, code: str = None,
     return d
 
 
-def section_field(label: str, indentation_level: int = 1) -> dict:
+def section_field(label: str, indentation_level: int = 1,
+                  relevance_rule: str = None) -> dict:
     """Crée un en-tête de section (élément de mise en page uniquement,
-    ne stocke aucune valeur)."""
+    ne stocke aucune valeur).
+
+    NB : contrairement aux autres constructeurs de champs, le package R
+    de référence (sectionFieldSchema()) n'expose pas relevanceRule comme
+    paramètre — on ne sait donc pas avec certitude si masquer une
+    section entière via une règle de pertinence fonctionne réellement
+    dans l'interface (peut-être que seuls les champs de données inclus
+    dans la section masquée cesseraient d'apparaître, pas l'en-tête lui-
+    même, ou l'inverse). Pour un gating fiable, préfère mettre la règle
+    directement sur chaque champ de données concerné plutôt que sur la
+    section qui les précède."""
     from ..utils.cuid import generate_cuid
-    return {
+    d = {
         "id": generate_cuid(), "label": label, "type": "section",
         "typeParameters": {"indentationLevel": indentation_level},
     }
+    if relevance_rule:
+        d["relevanceCondition"] = relevance_rule
+    return d
+
