@@ -602,5 +602,156 @@ def test_add_form_with_parent_form_id_creates_subform(mock_req, client):
     assert schema.parent_form_id == "parentform1"
 
 
+def test_add_field_rejects_code_too_long(client):
+    """Confirmé par le serveur réel (checkForm() côté R) : un code de
+    champ ne peut pas dépasser 32 caractères. La validation se fait
+    avant tout appel réseau (échec rapide)."""
+    from activityinfo.models.field import text_field
+    too_long = "A" * 33
+    with pytest.raises(ValidationError):
+        client.add_field("form001", text_field("Test", code=too_long))
+
+
+def test_add_field_rejects_invalid_code_characters(client):
+    from activityinfo.models.field import text_field
+    with pytest.raises(ValidationError):
+        client.add_field("form001", text_field("Test", code="1_STARTS_WITH_DIGIT"))
+    with pytest.raises(ValidationError):
+        client.add_field("form001", text_field("Test", code="HAS SPACE"))
+
+
+@patch("requests.Session.request")
+def test_add_field_accepts_valid_code(mock_req, client):
+    from activityinfo.models.field import text_field
+    mock_req.side_effect = [
+        make_mock_response(200, {
+            "id": "form001", "label": "Test", "databaseId": "db001", "elements": [],
+        }),
+        make_mock_response(200, {"forms": [{"id": "form001", "schema": {
+            "id": "form001", "label": "Test", "databaseId": "db001", "elements": [],
+        }}]}),
+    ]
+    client.add_field("form001", text_field("Test", code="VALID_CODE_32"))  # ne doit pas lever
+
+
+# ─── TESTS : IMPORT_RECORDS (résolution des colonnes + conversion enumerated) ─
+
+def _make_import_schema_response():
+    return {
+        "id": "form001", "label": "Test", "databaseId": "db001",
+        "elements": [
+            {"id": "fld_nom", "label": "Nom complet", "type": "FREE_TEXT",
+             "code": "NOM", "required": False, "key": False},
+            {"id": "fld_age", "label": "Age", "type": "quantity",
+             "code": "AGE", "required": False, "key": False,
+             "typeParameters": {"units": "ans", "aggregation": "SUM"}},
+            {"id": "fld_sexe", "label": "Sexe", "type": "enumerated",
+             "code": "SEXE", "required": False, "key": False,
+             "typeParameters": {"cardinality": "single", "values": [
+                 {"id": "opt_h", "label": "Homme"},
+                 {"id": "opt_f", "label": "Femme"},
+             ]}},
+            {"id": "fld_services", "label": "Services", "type": "enumerated",
+             "code": "SERVICES", "required": False, "key": False,
+             "typeParameters": {"cardinality": "multiple", "values": [
+                 {"id": "opt_med", "label": "Médicale"},
+                 {"id": "opt_jur", "label": "Juridique"},
+             ]}},
+        ],
+    }
+
+
+@patch("requests.Session.request")
+def test_import_records_resolves_code_to_raw_field_id(mock_req, client):
+    """La ligne d'en-tête (fieldIds) doit contenir les ids bruts des
+    champs, pas les codes fournis par l'appelant — confirmé côté R
+    (matchColumn() résout code/label/id vers l'id brut du champ)."""
+    mock_req.side_effect = [
+        make_mock_response(200, _make_import_schema_response()),  # GET schema
+        make_mock_response(200, {"uploadUrl": "https://up.example/x", "importId": "imp1"}),
+        make_mock_response(200, {}),  # PUT upload
+        make_mock_response(200, {"id": "job1", "jobId": "job1"}),  # POST jobs
+        make_mock_response(200, {"state": "completed"}),  # GET job status
+    ]
+    client.import_records("form001", [{"NOM": "Alice", "AGE": 30}])
+
+    upload_call = mock_req.call_args_list[2]
+    content = upload_call.kwargs["data"].decode("utf-8")
+    lines = content.split("\n")
+    assert lines[0] == "LINE DELIMITED JSON RECORDS"
+    field_ids_line = json.loads(lines[2])
+    assert set(field_ids_line) == {"fld_nom", "fld_age"}  # ids bruts, pas "NOM"/"AGE"
+
+
+@patch("requests.Session.request")
+def test_import_records_converts_enum_label_to_option_id(mock_req, client):
+    """La valeur d'un champ enumerated fourni comme label ('Homme') doit
+    être convertie en id d'option brut avant l'envoi."""
+    mock_req.side_effect = [
+        make_mock_response(200, _make_import_schema_response()),
+        make_mock_response(200, {"uploadUrl": "https://up.example/x", "importId": "imp1"}),
+        make_mock_response(200, {}),
+        make_mock_response(200, {"id": "job1", "jobId": "job1"}),
+        make_mock_response(200, {"state": "completed"}),
+    ]
+    client.import_records("form001", [{"SEXE": "Homme"}])
+
+    content = mock_req.call_args_list[2].kwargs["data"].decode("utf-8")
+    record_line = json.loads(content.split("\n")[3])
+    assert "opt_h" in record_line  # id de l'option, pas le label "Homme"
+    assert "Homme" not in record_line
+
+
+@patch("requests.Session.request")
+def test_import_records_converts_multi_enum_labels_to_option_ids(mock_req, client):
+    mock_req.side_effect = [
+        make_mock_response(200, _make_import_schema_response()),
+        make_mock_response(200, {"uploadUrl": "https://up.example/x", "importId": "imp1"}),
+        make_mock_response(200, {}),
+        make_mock_response(200, {"id": "job1", "jobId": "job1"}),
+        make_mock_response(200, {"state": "completed"}),
+    ]
+    client.import_records("form001", [{"SERVICES": ["Médicale", "Juridique"]}])
+
+    content = mock_req.call_args_list[2].kwargs["data"].decode("utf-8")
+    record_line = json.loads(content.split("\n")[3])
+    services_value = record_line[-1]  # dernière colonne (seule fournie)
+    assert set(services_value) == {"opt_med", "opt_jur"}
+
+
+@patch("requests.Session.request")
+def test_import_records_invalid_enum_value_raises(mock_req, client):
+    """Une valeur qui ne correspond à aucune option doit lever une
+    erreur claire plutôt que d'envoyer une valeur invalide au serveur."""
+    mock_req.return_value = make_mock_response(200, _make_import_schema_response())
+    with pytest.raises(ValidationError):
+        client.import_records("form001", [{"SEXE": "Autre"}])
+
+
+@patch("requests.Session.request")
+def test_import_records_unknown_column_raises(mock_req, client):
+    mock_req.return_value = make_mock_response(200, _make_import_schema_response())
+    with pytest.raises(ValidationError):
+        client.import_records("form001", [{"COLONNE_INEXISTANTE": "x"}])
+
+
+@patch("requests.Session.request")
+def test_import_records_with_parent_record_id(mock_req, client):
+    """Vérifie l'ordre [recordId, parentId, champs...] dans chaque ligne
+    quand parent_record_id est fourni (import dans un sous-formulaire)."""
+    mock_req.side_effect = [
+        make_mock_response(200, _make_import_schema_response()),
+        make_mock_response(200, {"uploadUrl": "https://up.example/x", "importId": "imp1"}),
+        make_mock_response(200, {}),
+        make_mock_response(200, {"id": "job1", "jobId": "job1"}),
+        make_mock_response(200, {"state": "completed"}),
+    ]
+    client.import_records("form001", [{"NOM": "Alice"}], parent_record_id="PARENT1")
+
+    content = mock_req.call_args_list[2].kwargs["data"].decode("utf-8")
+    record_line = json.loads(content.split("\n")[3])
+    assert record_line[1] == "PARENT1"  # position 2 = parentId
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
