@@ -229,39 +229,8 @@ class ActivityInfoClient:
 
         BEST-EFFORT : reconstruit fidèlement à partir du code source R
         (payload imbriqué formResource/formClass, réponse imbriquée sous
-        forms[i].schema). Le cas général (formulaire top-level) a été
-        testé en direct. Le cas sous-formulaire (parent_form_id) a révélé
-        une contrainte serveur importante — voir ci-dessous.
-
-        IMPORTANT — Créer un SOUS-FORMULAIRE nécessite un ordre précis
-        -------------------------------------------------------------------
-        Confirmé par un message d'erreur serveur explicite obtenu en test
-        réel : "Subforms cannot be added to a database without a
-        corresponding subform field. First update the parent schema with
-        a new subform field, and then update the subform."
-
-        Autrement dit, l'ordre est l'INVERSE de ce qu'on pourrait
-        supposer :
-        1. Génère d'abord l'id du futur sous-formulaire toi-même
-           (`from activityinfo.utils.cuid import generate_cuid`).
-        2. Ajoute un champ `subform_field(..., subform_id=cet_id)` au
-           formulaire PARENT via `add_field()` — AVANT que le
-           sous-formulaire existe.
-        3. Crée ENSUITE le sous-formulaire lui-même via `add_form()`, en
-           forçant `form_id=` sur ce même id pour qu'il corresponde à ce
-           que le champ du parent référence déjà.
-
-        Exemple
-        -------
-        >>> from activityinfo.utils.cuid import generate_cuid
-        >>> from activityinfo import subform_field
-        >>> new_id = generate_cuid()
-        >>> client.add_field(parent_form_id, subform_field(
-        ...     "Détails VBG", subform_id=new_id, code="DETAILS_VBG"))
-        >>> client.add_form(
-        ...     "db_id", "Détails VBG", elements,
-        ...     parent_form_id=parent_form_id, form_id=new_id)
-
+        forms[i].schema). 
+      
         Paramètres
         ----------
         database_id : str
@@ -370,15 +339,6 @@ class ActivityInfoClient:
             l'id est donné, plutôt qu'à la fin du formulaire (comportement
             par défaut, identique à R). Si le code/id n'est pas trouvé,
             le champ est ajouté à la fin avec un avertissement.
-
-            Position non testée en direct : le package R n'offre pas
-            cette option (il ajoute toujours à la fin), donc l'hypothèse
-            que l'ordre de la liste `elements` détermine l'ordre
-            d'affichage dans le formulaire n'a pas été confirmée contre
-            un vrai serveur — à vérifier visuellement après le test.
-        position : int, optionnel
-            Alternative à `after` : index numérique où insérer le champ
-            (0 = tout au début). Ignoré si `after` est aussi fourni.
 
         Exemple
         -------
@@ -521,11 +481,6 @@ class ActivityInfoClient:
         Supprime un formulaire.
         Équivalent R : deleteForm()  →  POST /resources/databases/{id}
         avec un diff de type resourceDeletions.
-
-        Changement de signature par rapport à la version précédente :
-        database_id est désormais requis, car l'API réelle exprime la
-        suppression d'un formulaire comme une mise à jour de la base de
-        données qui le contient (il n'existe pas de DELETE /form/{id}).
         """
         request = self._database_updates(resourceDeletions=[form_id])
         self._post(f"/databases/{database_id}", json=request)
@@ -567,18 +522,6 @@ class ActivityInfoClient:
                     window_size: int = 5000) -> List[FormRecord]:
         """
         Récupère tous les enregistrements d'un formulaire.
-
-        BEST-EFFORT : il n'existe PAS d'endpoint REST direct
-        "liste des enregistrements d'un formulaire" dans l'API réelle
-        (contrairement à ce que la version précédente supposait, avec
-        pagination par curseur inventée). La vraie méthode consiste à
-        interroger le formulaire via le mécanisme de requêtes en colonnes
-        (POST /resources/query/columns), comme le fait queryTable() côté R,
-        puis à reconstituer des lignes à partir des colonnes retournées.
-
-        Cette reconstruction a été faite à partir du code source R mais
-        n'a jamais été testée contre un vrai serveur — vérifie le résultat
-        sur un petit formulaire avant de t'y fier pour un usage critique.
 
         Paramètres
         ----------
@@ -638,13 +581,6 @@ class ActivityInfoClient:
         Reconstitue, pour chaque colonne demandée, une liste de `rows`
         valeurs à partir de la réponse de /resources/query/columns.
 
-        Structure réelle confirmée en direct (différente de ce que la
-        documentation R suggérait) : `data["columns"]` est un DICTIONNAIRE
-        indexé par id de colonne — {"_id": {"type": ..., "storage": ...,
-        "values": [...]}, ...} — pas une liste de {"id": ..., ...} comme
-        supposé initialement. Gère 3 modes de stockage par colonne :
-        "constant" (une seule valeur répétée), "array" (une valeur par
-        ligne), autre/absent (colonne vide).
         """
         result: Dict[str, List[Any]] = {}
         columns = data.get("columns", {})
@@ -760,33 +696,6 @@ class ActivityInfoClient:
         """
         Importe plusieurs enregistrements en masse (job asynchrone).
         Équivalent R : importRecords()
-
-        BEST-EFFORT — RISQUE ÉLEVÉ, NON TESTÉ EN DIRECT.
-        L'import réel en 3 étapes (mise en scène du fichier via
-        POST /resources/imports/stage[/direct], upload du contenu au
-        format "LINE DELIMITED JSON RECORDS" vers l'URL renvoyée, puis
-        soumission d'un job "importRecords") a été reconstruit fidèlement
-        à partir du code source R, mais n'a jamais pu être vérifié contre
-        un vrai serveur depuis cet environnement (pas d'accès réseau à
-        activityinfo.org ici). Teste d'abord avec 1 ou 2 lignes sur un
-        formulaire de test avant tout usage en production.
-
-        NB : cette méthode récupère d'abord le schéma du formulaire (un
-        appel réseau de plus) pour reproduire deux traductions que R
-        applique avant l'envoi, confirmées dans son code source
-        (matchColumn(), prepareEnumImport()) :
-        - Les clés de `records` peuvent être des codes, des labels, ou
-          des ids bruts de champs — elles sont résolues vers l'id brut
-          réellement attendu par le format d'import.
-        - Pour un champ "enumerated", la valeur fournie doit être le
-          label d'une option (ex: "Oui", "Viol") — elle est convertie en
-          l'id interne de cette option avant l'envoi. Une valeur qui ne
-          correspond à aucune option lève une ValidationError plutôt que
-          d'envoyer une valeur invalide silencieusement.
-
-        Types de champs non couverts par cette conversion (envoyés
-        tels quels, non vérifiés) : reference (attend probablement l'id
-        brut de l'enregistrement référencé, pas un label), date, geopoint.
 
         Paramètres
         ----------
@@ -961,10 +870,7 @@ class ActivityInfoClient:
         # Convertir en liste de dicts, en remplaçant les NaN par None.
         # NB : on ne peut pas comparer au nom de classe "float" car
         # pandas/numpy retournent souvent des numpy.float64 ("float64"),
-        # ce qui ratait silencieusement la détection des NaN. Le test
-        # `v != v` est vrai uniquement pour NaN (IEEE 754), et fonctionne
-        # aussi bien pour float, numpy.float64 ou pandas.NA sans avoir à
-        # importer numpy/pandas ici.
+        # ce qui ratait silencieusement la détection des NaN. 
         records = []
         for _, row in df.iterrows():
             record = {}
@@ -1035,10 +941,6 @@ class ActivityInfoClient:
         Équivalent R : addDatabaseUser()
         →  POST /resources/databases/{id}/users
 
-        NB : contrairement à la version précédente (qui envoyait un simple
-        "roleId" au niveau racine), l'API réelle attend un objet "role"
-        imbriqué {id, parameters, resources} ainsi qu'une clé "grants".
-
         Paramètres
         ----------
         role_id : str
@@ -1087,9 +989,6 @@ class ActivityInfoClient:
         Équivalent R : updateUserRole()
         →  POST /resources/databases/{id}/users/{user_id}/role
 
-        NB : c'est un POST, pas un PUT, et le payload attend une liste
-        "assignments" plutôt qu'un simple "roleId" (contrairement à la
-        version précédente de ce client).
         """
         assignment = {
             "id": role_id,
@@ -1114,14 +1013,6 @@ class ActivityInfoClient:
         (une liste de dicts {nom_colonne: valeur}).
         Équivalent R : queryTable()
 
-        NB : la version précédente postait vers `/query/rows`, un chemin
-        qui n'existe pas dans l'API réelle. Le bon endpoint est
-        POST /resources/query/columns (réponse au format colonnes,
-        reconstituée ici en lignes).
-
-        La reconstruction ligne-par-ligne à partir de la réponse
-        colonnes n'a pas pu être testée en direct — voir get_records()
-        pour les mêmes réserves.
         """
         if not columns:
             raise ValidationError(
@@ -1212,11 +1103,6 @@ class ActivityInfoClient:
         """
         Attend la fin d'un job asynchrone avec polling.
         Lève JobError si le job échoue ou dépasse max_wait secondes.
-
-        NB : l'API réelle utilise des états en minuscules ("started",
-        "completed"), pas "RUNNING"/"COMPLETED"/"FAILED" en majuscules
-        comme le supposait la version précédente — ce qui la faisait
-        boucler indéfiniment (jusqu'à max_wait) même en cas de succès.
         """
         elapsed = 0
         while elapsed < max_wait:
@@ -1249,10 +1135,6 @@ class ActivityInfoClient:
         """
         Récupère le statut du compte utilisateur actuel.
 
-        NON DISPONIBLE : aucun endpoint équivalent trouvé dans le
-        package R de référence. Plutôt que de renvoyer silencieusement
-        des données incorrectes (comportement précédent), cette méthode
-        lève explicitement une erreur.
         """
         raise NotImplementedError(
             "get_account_status() n'a pas d'endpoint confirmé dans l'API "
