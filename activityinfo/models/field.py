@@ -9,9 +9,7 @@ Inspiré de fieldSchema() du package R bedatadriven.
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Dict, Literal
 
-# Types de champs réellement renvoyés par l'API ActivityInfo (voir note
-# ci-dessus sur l'incohérence de casse — c'est le comportement réel du
-# serveur, pas une coquille de notre part).
+# Types de champs réellement renvoyés par l'API ActivityInfo 
 FIELD_TYPES = Literal[
     "FREE_TEXT",
     "NARRATIVE",
@@ -405,7 +403,7 @@ def section_field(label: str, indentation_level: int = 1,
 
     NB : contrairement aux autres constructeurs de champs, le package R
     de référence (sectionFieldSchema()) n'expose pas relevanceRule comme
-    paramètre — on ne sait donc pas avec certitude si masquer une
+    paramètre, on ne sait donc pas avec certitude si masquer une
     section entière via une règle de pertinence fonctionne réellement
     dans l'interface (peut-être que seuls les champs de données inclus
     dans la section masquée cesseraient d'apparaître, pas l'en-tête lui-
