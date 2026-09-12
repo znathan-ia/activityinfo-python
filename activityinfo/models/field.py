@@ -91,47 +91,70 @@ class Field:
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
-        """Sérialise le champ pour l'API ActivityInfo."""
-        d: Dict[str, Any] = {
-            "id": self.id,
-            "label": self.label,
-            "type": self.type,
-            "required": self.required,
-            "key": self.key,
-        }
+        """
+        Sérialise le champ pour l'API ActivityInfo.
+
+        IMPORTANT : part de la donnée brute d'origine (_raw) quand elle
+        existe, plutôt que de reconstruire le dict de zéro. Ce n'est pas
+        cosmétique : un champ réel peut porter des propriétés que notre
+        modèle Field ne connaît pas explicitement (ex : typeParameters.
+        lookupConfigs pour un sélecteur en cascade, découvert en
+        conditions réelles). Reconstruire à partir de zéro les perdait
+        SILENCIEUSEMENT à chaque fois qu'un champ passait par un cycle
+        lecture→modification→écriture — y compris sur des champs qu'on
+        n'avait jamais eu l'intention de toucher (add_field()/
+        update_form_schema() réécrivent tout le schéma, champ par champ).
+        """
+        d: Dict[str, Any] = dict(self._raw) if self._raw else {}
+
+        d["id"] = self.id
+        d["label"] = self.label
+        d["type"] = self.type
+        d["required"] = self.required
+        d["key"] = self.key
+
         if self.code:
             d["code"] = self.code
+        else:
+            d.pop("code", None)
         if self.description:
             d["description"] = self.description
+        else:
+            d.pop("description", None)
         if self.relevance_rule:
             d["relevanceCondition"] = self.relevance_rule
+        else:
+            d.pop("relevanceCondition", None)
         if self.validation_rule:
             d["validationCondition"] = self.validation_rule
+        else:
+            d.pop("validationCondition", None)
 
-        # Un seul de ces attributs est pertinent à la fois selon le type
-        # du champ. On utilise une chaîne elif pour ne jamais écraser
-        # silencieusement typeParameters si plusieurs attributs se
-        # trouvaient renseignés simultanément.
+        # typeParameters : on FUSIONNE nos attributs connus dans ce qui
+        # existait déjà, plutôt que de remplacer tout le dict — pour que
+        # des clés qu'on ne modélise pas explicitement (lookupConfigs,
+        # etc.) survivent au cycle lecture/écriture.
+        type_params: Dict[str, Any] = dict(d.get("typeParameters") or {})
+
         if self.options:
-            d["typeParameters"] = {
-                "cardinality": self.cardinality or "single",
-                "presentation": "automatic",
-                "values": [o.to_dict() for o in self.options],
-            }
+            type_params["cardinality"] = self.cardinality or "single"
+            type_params.setdefault("presentation", "automatic")
+            type_params["values"] = [o.to_dict() for o in self.options]
         elif self.reference_form_id:
-            d["typeParameters"] = {
-                "cardinality": "single",
-                "range": [{"formId": self.reference_form_id}],
-            }
+            type_params.setdefault("cardinality", "single")
+            type_params["range"] = [{"formId": self.reference_form_id}]
         elif self.subform_id:
-            d["typeParameters"] = {"formId": self.subform_id}
+            type_params["formId"] = self.subform_id
         elif self.units is not None:
-            d["typeParameters"] = {
-                "units": self.units,
-                "aggregation": self.aggregation or "SUM",
-            }
+            type_params["units"] = self.units
+            type_params["aggregation"] = self.aggregation or "SUM"
         elif self.formula:
-            d["typeParameters"] = {"formula": self.formula}
+            type_params["formula"] = self.formula
+
+        if type_params:
+            d["typeParameters"] = type_params
+        else:
+            d.pop("typeParameters", None)
 
         return d
 
