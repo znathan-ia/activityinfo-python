@@ -752,7 +752,12 @@ class ActivityInfoClient:
                 pass
 
             if field.type == "enumerated":
-                options_by_label = {o.label.lower(): o.id for o in field.options}
+                # Les deux côtés de la comparaison doivent être normalisés de la
+                # même façon (espaces + casse) — sinon une option dont le
+                # libellé source a un espace résiduel (fréquent sur des
+                # données réelles importées depuis Excel) ne correspondrait
+                # jamais, même si la valeur est manifestement la bonne.
+                options_by_label = {o.label.strip().lower(): o.id for o in field.options}
                 if field.cardinality == "multiple":
                     raw_values = value if isinstance(value, (list, tuple, set)) else [value]
                     ids = []
