@@ -314,16 +314,52 @@ def multi_select_field(label: str, options: List[str], code: str = None,
 
 def reference_field(label: str, form_id: str, code: str = None,
                     required: bool = False,
-                    relevance_rule: str = None) -> dict:
-    """Crée un champ référence vers un autre formulaire."""
+                    relevance_rule: str = None,
+                    lookup_configs: list = None) -> dict:
+    """Crée un champ référence vers un autre formulaire.
+
+    Paramètres
+    ----------
+    lookup_configs : list[dict], optionnel
+        Active un sélecteur en CASCADE (plusieurs niveaux de menus
+        déroulants successifs) plutôt qu'un simple menu déroulant plat.
+        Mécanisme confirmé en inspectant le JSON brut d'un champ réel
+        (absent du package R, qui n'expose que 'range') :
+        typeParameters.lookupConfigs = [
+            {"formula": "<id_du_champ_dans_le_formulaire_référencé>",
+             "lookupLabel": "<libellé affiché à ce niveau>"},
+            ...
+        ]
+        Chaque entrée est un niveau de la cascade, dans l'ordre
+        d'affichage. L'id de chaque entrée ("id") est généré
+        automatiquement si absent.
+
+        Exemple — cascade Région > Province > Commune :
+        >>> reference_field(
+        ...     "Localisation", form_id="admin_units_form_id",
+        ...     lookup_configs=[
+        ...         {"formula": "region_field_id", "lookupLabel": "Région"},
+        ...         {"formula": "province_field_id", "lookupLabel": "Province"},
+        ...         {"formula": "commune_field_id", "lookupLabel": "Commune"},
+        ...     ]
+        ... )
+    """
     from ..utils.cuid import generate_cuid
+    type_params = {
+        "cardinality": "single",
+        "range": [{"formId": form_id}],
+    }
+    if lookup_configs:
+        type_params["lookupConfigs"] = [
+            {"id": lc.get("id") or generate_cuid(),
+             "formula": lc["formula"],
+             "lookupLabel": lc["lookupLabel"]}
+            for lc in lookup_configs
+        ]
     d = {
         "id": generate_cuid(), "label": label,
         "type": "reference", "required": required,
-        "typeParameters": {
-            "cardinality": "single",
-            "range": [{"formId": form_id}],
-        },
+        "typeParameters": type_params,
     }
     if code: d["code"] = code
     if relevance_rule: d["relevanceCondition"] = relevance_rule
@@ -418,4 +454,3 @@ def section_field(label: str, indentation_level: int = 1,
     if relevance_rule:
         d["relevanceCondition"] = relevance_rule
     return d
-
